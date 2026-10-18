@@ -1,0 +1,33 @@
+# ==============================================================================
+# docker-compose.yml — VERONICA (Net Neural AI Platform)
+# Orquestração Containerizada com Persistência de Checkpoints, Sessões e Auditoria (Seção 12)
+# ==============================================================================
+services:
+  veronica-platform:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: veronica-net-neural-ai
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      - PYTHONPATH=/app
+      - VERONICA_ENV=PRODUCTION
+      - VERONICA_PORT=8000
+      - VERONICA_READ_ONLY_DEFAULT=true
+      - VERONICA_ALLOW_VOICE_APPROVAL=false
+    volumes:
+      - veronica_runtime_data:/app/runtime_data
+    security_opt:
+      - no-new-privileges:true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/api/neural/architecture', timeout=4)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+
+volumes:
+  veronica_runtime_data:
+    driver: local

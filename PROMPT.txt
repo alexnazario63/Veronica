@@ -1,0 +1,836 @@
+# PROJETO: NET NEURAL AI — INTELIGÊNCIA ARTIFICIAL NATIVA PARA ENGENHARIA DE REDES
+
+## 1. OBJETIVO PRINCIPAL
+
+Desenvolva uma plataforma de Inteligência Artificial especializada em engenharia, administração, operação, diagnóstico e automação de redes de computadores.
+
+A IA deverá possuir uma arquitetura neural própria, desenvolvida desde seus fundamentos matemáticos, incluindo neurônios artificiais, camadas, funções de ativação, mecanismos de atenção, cálculo de gradientes, backpropagation, otimização, treinamento, inferência e gerenciamento dos parâmetros aprendidos.
+
+Não utilizar APIs de modelos de linguagem comerciais, modelos pré-treinados ou pesos de terceiros como motor principal da inteligência.
+
+Bibliotecas matemáticas e de computação acelerada poderão ser utilizadas, mas a arquitetura neural e os algoritmos centrais deverão ser implementados e documentados pelo projeto.
+
+A IA deverá evoluir para uma especialista em redes de computadores, capaz de compreender protocolos, topologias, equipamentos, configurações, falhas, dependências e procedimentos operacionais.
+
+O desenvolvimento deve ser modular, incremental, testável e baseado em engenharia de software.
+
+## 2. PRINCÍPIOS FUNDAMENTAIS
+
+1. Desenvolver a inteligência neural do zero.
+2. Priorizar precisão técnica, segurança operacional e rastreabilidade.
+3. Aprender utilizando fontes oficiais, normas técnicas e documentação fornecida.
+4. Não inventar comandos, parâmetros, compatibilidades ou funcionalidades.
+5. Identificar fabricante, família, modelo, sistema operacional, versão e recursos disponíveis.
+6. Diferenciar informações comprovadas, inferências e hipóteses.
+7. Nunca presumir compatibilidade entre versões ou modelos.
+8. Preservar configurações existentes que estejam funcionando.
+9. Nunca realizar mudanças em produção sem autorização explícita e verificações obrigatórias.
+10. Permitir expansão contínua para novos fabricantes, equipamentos e tecnologias.
+11. Manter histórico de aprendizado, fontes, decisões e operações.
+12. Tratar documentação externa como dados não confiáveis até sua validação.
+
+## 3. ARQUITETURA NEURAL NATIVA
+
+Implementar um núcleo de inteligência com os seguintes componentes:
+
+### 3.1 Motor matemático
+
+Desenvolver:
+
+- Operações com tensores.
+- Multiplicação matricial.
+- Neurônios artificiais parametrizados.
+- Pesos e bias.
+- Funções de ativação ReLU, GELU, Sigmoid, Tanh e Softmax.
+- Normalização de camadas.
+- Funções de perda.
+- Cálculo automático ou manual de gradientes.
+- Backpropagation.
+- Otimizadores SGD e AdamW.
+- Inicialização de parâmetros.
+- Treinamento em minibatches.
+- Gradient clipping.
+- Checkpoints.
+- Serialização de pesos.
+- Testes numéricos de gradientes.
+
+Implementar testes comparando os gradientes calculados com aproximações por diferenças finitas.
+
+### 3.2 Arquitetura Transformer própria
+
+Desenvolver progressivamente:
+
+- Tokenizador técnico.
+- Vocabulário especializado.
+- Embeddings treináveis.
+- Positional encoding ou RoPE.
+- Scaled dot-product attention.
+- Multi-head self-attention.
+- Blocos Transformer.
+- Feed-forward networks.
+- Residual connections.
+- Layer normalization ou RMSNorm.
+- Máscara causal.
+- Cabeça de previsão de tokens.
+- Decodificação autoregressiva.
+- Estratégias de geração.
+- Cache de atenção.
+- Treinamento por previsão do próximo token.
+
+Não copiar pesos de modelos existentes.
+
+Permitir configurar número de camadas, dimensões dos embeddings, quantidade de cabeças, parâmetros e tamanho do contexto.
+
+### 3.3 Escalabilidade
+
+A arquitetura deverá suportar diferentes tamanhos de modelo, conforme recursos disponíveis.
+
+Implementar:
+
+- Treinamento em CPU e GPU.
+- Precisão mista quando suportada.
+- Acumulação de gradientes.
+- Checkpointing de ativações.
+- Treinamento distribuído futuramente.
+- Monitoramento de VRAM e RAM.
+- Métricas de desempenho.
+- Avaliação de perplexidade e precisão técnica.
+
+Não prometer desempenho equivalente a grandes modelos comerciais sem treinamento e avaliação que comprovem isso.
+
+## 4. SISTEMA DE CONHECIMENTO ESPECIALIZADO
+
+A IA deverá possuir dois mecanismos distintos:
+
+**Conhecimento paramétrico:** adquirido durante treinamento e fine-tuning do modelo neural próprio.
+
+**Conhecimento documental:** obtido por recuperação de documentos, pesquisa e consulta a uma base técnica indexada.
+
+Implementar RAG (Retrieval-Augmented Generation), inicialmente com um mecanismo de recuperação lexical e posteriormente com embeddings próprios treinados.
+
+A plataforma deverá conseguir:
+
+- Pesquisar documentação oficial na internet.
+- Receber PDFs, TXT, Markdown, HTML, DOCX, JSON, XML e arquivos de configuração.
+- Extrair textos, tabelas e comandos.
+- Processar documentos extensos.
+- Indexar conteúdos.
+- Identificar versões e datas.
+- Relacionar comandos aos equipamentos compatíveis.
+- Identificar documentação obsoleta.
+- Detectar informações conflitantes.
+- Priorizar documentos oficiais.
+- Apresentar referências e evidências das respostas.
+
+Cada informação deverá preservar metadados:
+
+- Fabricante.
+- Família e modelo.
+- Sistema operacional.
+- Versão e build.
+- Recurso ou funcionalidade.
+- Fonte original.
+- URL ou arquivo.
+- Página e seção.
+- Data da publicação.
+- Data da consulta.
+- Grau de confiabilidade.
+- Restrições de aplicabilidade.
+
+Documentos inseridos pelo usuário deverão ser incorporados à base de conhecimento sem modificar automaticamente os pesos neurais.
+
+O treinamento posterior deverá ocorrer em um pipeline separado, com validação e versionamento de datasets.
+
+Respeitar autenticação, licenças, direitos autorais, limites de acesso e políticas dos portais oficiais.
+
+## 5. FABRICANTES E EQUIPAMENTOS
+
+Criar um sistema de adaptadores extensível, inicialmente contemplando:
+
+- Huawei: VRP, switches CloudEngine, S-series, roteadores NE e equipamentos de transporte.
+- Cisco: IOS, IOS XE, IOS XR, NX-OS.
+- Juniper: Junos OS e Junos OS Evolved.
+- MikroTik: RouterOS 6 e 7.
+- Nokia: SR OS.
+- Arista: EOS.
+- HPE e Aruba: sistemas operacionais correspondentes.
+- Fortinet: FortiOS.
+- Extreme Networks.
+- Dell Networking.
+- Ubiquiti.
+- ZTE.
+- Outros fabricantes adicionados posteriormente.
+
+O suporte deverá ser implementado e validado individualmente por plataforma e versão.
+
+Não considerar que todos os equipamentos de um fabricante possuem a mesma CLI.
+
+Manter uma matriz de compatibilidade e declarar explicitamente quando um dispositivo ainda não for suportado ou validado.
+
+## 6. DOMÍNIOS DE CONHECIMENTO
+
+A IA deverá ser treinada e avaliada nos seguintes domínios:
+
+**Fundamentos:** modelo OSI, TCP/IP, Ethernet, IPv4, IPv6, ARP, ND, VLAN, STP, LACP, MTU, QoS e ACL.
+
+**Roteamento:** rotas estáticas, OSPF, OSPFv3, IS-IS, BGP, MP-BGP, políticas de roteamento, redistribuição e engenharia de tráfego.
+
+**MPLS e serviços:** LDP, RSVP-TE, Segment Routing, L2VPN, L3VPN, VPWS, VPLS, EVPN, VXLAN e pseudowires.
+
+**Infraestrutura:** backbone, redes metropolitanas, DWDM, OTN, enlaces ópticos, transceptores, potência óptica, atenuação e redundância.
+
+**Segurança:** firewalls, VPN, IPsec, AAA, RADIUS, TACACS+, SSH, hardening e segmentação.
+
+**Operação:** SNMP, NETCONF, RESTCONF, gNMI, syslog, telemetria, NMS, alarmes, monitoramento e troubleshooting.
+
+**Sistemas:** Linux, virtualização, containers, serviços de rede, DNS, DHCP, NTP e automação.
+
+## 7. MOTOR DE DIAGNÓSTICO DE REDES
+
+Desenvolver um mecanismo de investigação que combine:
+
+- Modelo neural.
+- Conhecimento documental.
+- Regras determinísticas.
+- Análise de topologia.
+- Histórico de eventos.
+- Dados operacionais em tempo real.
+- Raciocínio baseado em hipóteses verificáveis.
+
+A IA deverá:
+
+1. Receber uma descrição do problema.
+2. Identificar os equipamentos envolvidos.
+3. Consultar a topologia.
+4. Obter informações operacionais com acesso somente leitura.
+5. Analisar logs, alarmes e configurações.
+6. Formular hipóteses.
+7. Determinar testes seguros.
+8. Comparar resultados com o comportamento esperado.
+9. Identificar possíveis causas-raiz.
+10. Recomendar correções.
+11. Apresentar evidências, riscos e nível de confiança.
+
+Exemplo: identificar uma sessão BGP inativa, verificar conectividade, endereçamento, ASN, políticas, autenticação, estado TCP e demais dependências antes de propor alterações.
+
+Não executar comandos de diagnóstico potencialmente disruptivos sem aprovação específica.
+
+## 8. MOTOR DE CONFIGURAÇÃO SEGURA
+
+Desenvolver um motor de mudanças independente do modelo neural.
+
+O modelo neural poderá sugerir intenções e planos, mas não poderá executar comandos diretamente.
+
+Todas as mudanças deverão passar por um controlador determinístico com validação de permissões, compatibilidade, escopo e segurança.
+
+### Fluxo obrigatório
+
+**Etapa 1 — Descoberta**
+
+Identificar equipamento, modelo, versão, recursos, estado operacional, topologia, redundância e dependências.
+
+**Etapa 2 — Baseline**
+
+Coletar configurações e estados relevantes, incluindo interfaces, vizinhanças, rotas, sessões, serviços, alarmes e métricas.
+
+**Etapa 3 — Análise de impacto**
+
+Determinar o que poderá ser afetado, incluindo clientes, enlaces, protocolos, serviços e equipamentos dependentes.
+
+**Etapa 4 — Planejamento**
+
+Gerar um plano com alterações mínimas, comandos compatíveis, pré-condições, resultados esperados e rollback.
+
+**Etapa 5 — Simulação**
+
+Validar sintaxe, diferenças de configuração e comportamento em ambiente de laboratório ou digital twin quando disponível.
+
+**Etapa 6 — Aprovação**
+
+Exigir autorização humana explícita, vinculada ao plano, equipamento, versão da configuração e janela de manutenção.
+
+**Etapa 7 — Execução controlada**
+
+Aplicar somente as mudanças autorizadas, com limites de escopo, timeout, monitoramento e mecanismos de recuperação.
+
+**Etapa 8 — Pós-validação**
+
+Comparar os indicadores anteriores e posteriores, incluindo serviços e conectividade fim a fim.
+
+**Etapa 9 — Rollback**
+
+Executar reversão quando os critérios de falha forem atingidos, utilizando mecanismos suportados e previamente testados.
+
+**Etapa 10 — Auditoria**
+
+Registrar comandos, aprovações, resultados, evidências e incidentes.
+
+### Regras inegociáveis
+
+- Operação somente leitura por padrão.
+- Proibir alterações não autorizadas.
+- Nunca apagar configurações completas para realizar pequenos ajustes.
+- Não sobrescrever mudanças simultâneas de outros operadores.
+- Não aplicar comandos não verificados.
+- Não presumir que um backup garante recuperação.
+- Exigir acesso de recuperação independente quando necessário.
+- Bloquear mudanças se o impacto não puder ser avaliado.
+- Não executar alterações destrutivas sem controles específicos.
+- Parar quando as verificações de segurança falharem.
+- Preservar segredos em um cofre, nunca em logs ou datasets.
+
+## 9. ADAPTADORES DE EQUIPAMENTOS
+
+Cada adaptador deverá implementar interfaces padronizadas:
+
+- discover_device()
+- get_capabilities()
+- get_version()
+- get_running_config()
+- get_operational_state()
+- get_topology_neighbors()
+- collect_diagnostics()
+- validate_commands()
+- generate_candidate()
+- compare_configurations()
+- check_preconditions()
+- create_backup()
+- prepare_rollback()
+- apply_change()
+- verify_change()
+- rollback_change()
+
+As funções deverão ser implementadas conforme as capacidades reais de cada plataforma.
+
+Não executar operações de alteração quando o adaptador não possuir mecanismos de segurança adequados.
+
+## 10. SISTEMA DE APRENDIZADO CONTÍNUO
+
+Implementar três processos independentes:
+
+**Ingestão de conhecimento:** pesquisa, coleta, validação, extração e indexação de documentos.
+
+**Treinamento neural:** preparação de datasets, treinamento supervisionado, avaliação e criação de novos checkpoints.
+
+**Aprendizado operacional:** armazenamento de incidentes, diagnósticos, procedimentos e resultados validados.
+
+A IA poderá aprender com correções humanas, mas essas correções deverão ser verificadas antes de entrarem em datasets de treinamento.
+
+Nunca permitir que conteúdo de um documento externo modifique políticas de segurança, permissões ou regras de execução.
+
+Não realizar atualização automática de pesos em produção sem testes e aprovação de uma nova versão do modelo.
+
+## 11. INTERFACE E EXPERIÊNCIA
+
+Desenvolver uma plataforma web moderna com:
+
+- Chat técnico especializado.
+- Upload de documentação.
+- Pesquisa em fontes oficiais.
+- Inventário de equipamentos.
+- Visualização de topologia.
+- Terminal de diagnóstico controlado.
+- Comparação de configurações.
+- Análise de incidentes.
+- Histórico de mudanças.
+- Aprovações.
+- Métricas do modelo.
+- Gerenciamento de treinamento.
+- Administração de permissões.
+
+As respostas deverão informar:
+
+- Diagnóstico.
+- Evidências.
+- Fonte técnica.
+- Compatibilidade.
+- Risco.
+- Comandos propostos.
+- Plano de validação.
+- Plano de rollback.
+- Limitações ou informações desconhecidas.
+
+## 12. ARQUITETURA DE SOFTWARE
+
+Adotar inicialmente:
+
+- Python para núcleo neural e serviços.
+- NumPy para prototipagem matemática.
+- PyTorch apenas como referência de testes ou backend opcional, sem utilizar modelos ou pesos pré-treinados.
+- FastAPI para APIs.
+- PostgreSQL para dados estruturados.
+- Sistema de busca textual e vetorial para documentação.
+- Redis opcional para filas e cache.
+- React e TypeScript para interface.
+- Docker para implantação.
+- Adaptadores SSH, NETCONF, RESTCONF e gNMI conforme suporte.
+- Sistema de permissões RBAC.
+- Cofre de credenciais.
+- Logs de auditoria imutáveis ou protegidos contra adulteração.
+
+Organizar o repositório em:
+
+- core/neural
+- core/tokenizer
+- core/transformer
+- core/training
+- core/inference
+- knowledge/ingestion
+- knowledge/retrieval
+- knowledge/sources
+- networking/vendors
+- networking/protocols
+- networking/topology
+- networking/diagnostics
+- safety/policies
+- safety/change_control
+- safety/rollback
+- services/api
+- frontend
+- tests
+- docs
+
+## 13. PLANO DE DESENVOLVIMENTO
+
+**Fase 1 — Fundação matemática**
+
+Implementar neurônios, camadas, operações tensoriais, gradientes, backpropagation e testes.
+
+**Fase 2 — Modelo neural**
+
+Criar tokenizador, embeddings, Transformer, treinamento e inferência.
+
+**Fase 3 — Base de conhecimento**
+
+Implementar pesquisa documental, ingestão, indexação, recuperação e citações.
+
+**Fase 4 — Especialização em redes**
+
+Construir datasets técnicos, benchmarks, mecanismos de recuperação e avaliações por protocolo, fabricante e versão.
+
+**Fase 5 — Diagnóstico**
+
+Integrar inventário, topologia, telemetria e análise operacional somente leitura.
+
+**Fase 6 — Configuração em laboratório**
+
+Implementar adaptadores, análise de mudanças, validação, simulação e rollback em equipamentos virtuais.
+
+**Fase 7 — Operação assistida**
+
+Habilitar mudanças controladas, exclusivamente com autorização e controles de segurança comprovados.
+
+**Fase 8 — Evolução**
+
+Expandir fabricantes, modelos, versões, protocolos, desempenho e qualidade do modelo.
+
+## 14. TESTES E CRITÉRIOS DE ACEITAÇÃO
+
+Criar testes automatizados para:
+
+- Correção matemática.
+- Convergência de treinamento.
+- Serialização de checkpoints.
+- Qualidade da recuperação documental.
+- Precisão das citações.
+- Detecção de comandos inexistentes.
+- Compatibilidade por versão.
+- Diagnósticos com dados incompletos.
+- Falhas de conectividade.
+- Perda de sessão administrativa.
+- Mudanças concorrentes.
+- Rollback malsucedido.
+- Falhas parciais de execução.
+- Tentativas de injeção de instruções em documentos.
+- Vazamento de credenciais.
+- Mudanças sem autorização.
+- Preservação dos serviços existentes.
+
+Medir falsos positivos, falsos negativos, taxa de comandos inválidos, precisão de diagnósticos e sucesso de rollback.
+
+O projeto não poderá ser considerado seguro para produção apenas por passar em testes unitários.
+
+## 15. INSTRUÇÕES PARA INICIAR O DESENVOLVIMENTO
+
+Antes de programar:
+
+1. Analisar integralmente os requisitos.
+2. Produzir o documento de arquitetura técnica.
+3. Identificar limitações e riscos.
+4. Definir interfaces entre módulos.
+5. Definir formatos de datasets.
+6. Estabelecer métricas e critérios de aceitação.
+7. Elaborar roadmap incremental.
+8. Criar a estrutura inicial do repositório.
+
+Iniciar a implementação pela Fase 1.
+
+Implementar código real, executável e testado, evitando pseudocódigo em componentes entregues como funcionais.
+
+Não tentar implementar todas as fases simultaneamente.
+
+Ao concluir cada etapa, apresentar arquivos criados, testes realizados, limitações, decisões arquiteturais e próximos passos.
+
+**RESULTADO ESPERADO**
+
+Uma plataforma de IA nativa, modular e progressivamente especializada em engenharia de redes, com arquitetura neural própria, conhecimento técnico rastreável e capacidade futura de diagnosticar, planejar e executar operações de rede de forma controlada e verificável.
+
+A prioridade absoluta será a confiabilidade técnica e a preservação da operação da rede.
+
+
+# 16. INTERFACE GRÁFICA, CONVERSAÇÃO MULTIMODAL E OBSERVABILIDADE NEURAL
+
+## 16.1 Objetivo
+
+Implementar uma interface gráfica completa para interação com a IA especialista em redes, permitindo que o usuário solicite tarefas por texto ou áudio, mantenha conversas contínuas e acompanhe visualmente o desenvolvimento, treinamento e comportamento do modelo neural.
+
+A interface será parte integrante do produto, não um recurso opcional.
+
+A experiência deverá ser moderna, responsiva, acessível e adequada para operadores NOC, engenheiros de redes e administradores de infraestrutura.
+
+Idioma padrão: português brasileiro.
+
+## 16.2 GUI principal
+
+Criar uma aplicação web com as seguintes áreas:
+
+### A. Chat inteligente
+
+Implementar:
+
+- Campo de mensagem com suporte a texto extenso.
+- Envio por botão e teclado.
+- Conversas com múltiplas mensagens.
+- Contexto conversacional persistente por sessão.
+- Histórico de conversas.
+- Criação e renomeação de conversas.
+- Continuação de tarefas anteriores.
+- Indicador de processamento.
+- Cancelamento de geração.
+- Exibição progressiva das respostas.
+- Formatação de código e comandos de rede.
+- Blocos de configuração copiáveis.
+- Tabelas, diagramas e visualizações.
+- Citações vinculadas aos documentos utilizados.
+- Anexos e uploads de arquivos.
+- Feedback sobre respostas incorretas.
+- Apresentação explícita das incertezas do modelo.
+
+A IA deverá responder considerando o histórico relevante da conversa, mas separar claramente o contexto conversacional dos fatos comprovados pela documentação.
+
+Implementar gerenciamento de contexto, sumarização de histórico e limites de tokens para evitar crescimento ilimitado das conversas.
+
+### B. Entrada e saída de áudio
+
+Implementar um modo de conversação por voz.
+
+Requisitos:
+
+1. Capturar áudio mediante permissão explícita do navegador.
+2. Converter fala em texto utilizando um mecanismo de reconhecimento de voz.
+3. Encaminhar a transcrição ao mesmo núcleo conversacional utilizado pelo chat.
+4. Gerar a resposta usando o modelo neural próprio.
+5. Converter a resposta textual em áudio.
+6. Reproduzir a resposta de forma progressiva quando suportado.
+7. Permitir interromper a reprodução.
+8. Permitir que o usuário fale novamente sem reiniciar a conversa.
+9. Manter histórico sincronizado entre texto e voz.
+10. Permitir correção de transcrições.
+11. Exibir indicadores de microfone ativo, processamento e reprodução.
+12. Tratar falhas de permissão, ausência de microfone, ruído e perda de conexão.
+13. Disponibilizar controles de privacidade e exclusão de gravações.
+14. Não gravar conversas continuamente sem consentimento.
+
+Implementar detecção de fim de fala e gerenciamento de turnos.
+
+A arquitetura de áudio deverá utilizar componentes substituíveis para reconhecimento de fala (ASR), detecção de atividade vocal (VAD) e síntese de fala (TTS).
+
+Dar preferência a mecanismos locais e de código aberto quando viáveis.
+
+Se o modelo neural próprio ainda não possuir capacidade linguística suficiente, permitir que os componentes de áudio convertam fala em texto e texto em fala sem substituir o núcleo de inteligência por um modelo externo.
+
+Não declarar conversação em tempo real até que latência, interrupção, sincronização e qualidade tenham sido testadas.
+
+### C. Gerenciamento de sessões
+
+Cada conversa deverá possuir:
+
+- Identificador.
+- Histórico ordenado.
+- Mensagens de usuário e IA.
+- Transcrições de áudio quando habilitadas.
+- Referências documentais.
+- Arquivos associados.
+- Estado de execução das tarefas.
+- Resultados de ferramentas.
+- Identificador do modelo e checkpoint utilizado.
+- Datas de criação e atualização.
+
+As mensagens devem ser armazenadas de forma segura, com permissões por usuário.
+
+Implementar continuidade entre sessões sem misturar contextos de usuários diferentes.
+
+## 16.3 Painel visual da rede neural
+
+Criar uma área independente chamada Neural Lab ou Neural Observatory.
+
+O painel deverá apresentar dados reais do treinamento e da inferência, obtidos diretamente do motor neural.
+
+### A. Visualização da arquitetura
+
+Exibir graficamente:
+
+- Camadas de entrada.
+- Embeddings.
+- Camadas ocultas.
+- Blocos Transformer.
+- Cabeças de atenção.
+- Redes feed-forward.
+- Camada de saída.
+- Conexões e dimensões dos tensores.
+- Quantidade de parâmetros treináveis.
+- Parâmetros totais e não treináveis.
+- Número de camadas e cabeças de atenção.
+
+Permitir ampliar, reduzir, mover e inspecionar os componentes.
+
+Ao selecionar um componente, exibir suas dimensões, função matemática, parâmetros, gradientes e métricas relevantes.
+
+Para redes pequenas, permitir visualização individual dos neurônios e conexões.
+
+Para modelos grandes, utilizar agrupamento por camada, bloco ou cabeça de atenção, evitando tentar desenhar milhões de parâmetros individualmente.
+
+Diferenciar graficamente conexões treináveis, componentes congelados e componentes desabilitados.
+
+### B. Monitoramento do treinamento
+
+Exibir em tempo real:
+
+- Estado: parado, inicializando, treinando, avaliando, pausado ou concluído.
+- Época atual e total planejado.
+- Step atual.
+- Tokens processados.
+- Loss de treinamento.
+- Loss de validação.
+- Perplexidade quando aplicável.
+- Learning rate.
+- Normas dos gradientes.
+- Gradientes não finitos.
+- Tempo por step.
+- Tokens por segundo.
+- Tempo decorrido.
+- Estimativa de tempo restante quando calculável.
+- Tamanho dos batches.
+- Checkpoints criados.
+- Erros e avisos.
+
+Implementar gráficos históricos para loss, métricas, learning rate e gradientes.
+
+Detectar sinais de sobreajuste, divergência, gradientes explosivos e ausência de progresso.
+
+O painel deverá distinguir medições reais de estimativas.
+
+### C. Inspeção de parâmetros
+
+Permitir consultar:
+
+- Estatísticas dos pesos.
+- Distribuições dos parâmetros.
+- Normas dos gradientes.
+- Ativações de amostras de diagnóstico.
+- Saturação de funções de ativação.
+- Estatísticas de embeddings.
+- Estatísticas de atenção.
+- Consumo de memória por componente.
+
+A inspeção de ativações e atenção deverá ocorrer somente em amostras selecionadas, com limites de memória e sem armazenar dados sensíveis desnecessariamente.
+
+Não carregar todos os pesos na interface gráfica.
+
+Criar endpoints de diagnóstico que retornem estatísticas agregadas.
+
+### D. Infraestrutura de treinamento
+
+Monitorar:
+
+- CPU.
+- RAM.
+- GPU.
+- VRAM.
+- Utilização do acelerador.
+- Consumo de armazenamento.
+- Velocidade de leitura dos datasets.
+- Tempo gasto no processamento de dados.
+- Falhas de execução.
+
+Usar fontes reais de telemetria do sistema operacional e do backend de treinamento.
+
+Quando determinada métrica não estiver disponível, exibir indisponibilidade em vez de inventar valores.
+
+## 16.4 Painel de desenvolvimento e aprendizado
+
+Além do monitoramento matemático, implementar uma visão do desenvolvimento intelectual da IA.
+
+Exibir:
+
+- Datasets utilizados por experimento.
+- Quantidade de amostras e tokens processados.
+- Fabricantes e domínios abordados.
+- Resultados de benchmarks técnicos.
+- Taxa de acerto por categoria.
+- Resultados de recuperação documental.
+- Precisão de citações.
+- Comandos tecnicamente inválidos detectados nos testes.
+- Desempenho por fabricante, modelo e versão.
+- Evolução entre checkpoints.
+- Regressões encontradas.
+- Limitações conhecidas.
+
+Não confundir quantidade de documentos ingeridos com conhecimento efetivamente adquirido.
+
+A evolução deverá ser comprovada por avaliações repetíveis com conjuntos de testes independentes.
+
+Separar:
+
+1. Conhecimento recuperado dos documentos.
+2. Capacidade aprendida nos parâmetros.
+3. Desempenho demonstrado em benchmarks.
+4. Conhecimento operacional confirmado em ambiente de teste.
+
+Não apresentar uma barra genérica de porcentagem de inteligência ou alegar que a IA aprendeu determinado conteúdo apenas porque o documento foi indexado.
+
+## 16.5 Laboratório de experimentos
+
+Criar uma área para:
+
+- Iniciar treinamento.
+- Pausar e retomar.
+- Encerrar experimentos.
+- Selecionar datasets autorizados.
+- Configurar hiperparâmetros.
+- Comparar experimentos.
+- Consultar logs.
+- Validar checkpoints.
+- Restaurar checkpoints.
+- Executar benchmarks.
+- Promover uma versão para ambiente de homologação.
+
+Não substituir automaticamente o modelo em uso por um checkpoint recém-treinado.
+
+Toda promoção de modelo deverá passar por avaliação, aprovação e possibilidade de reversão.
+
+## 16.6 Arquitetura técnica da GUI
+
+Utilizar inicialmente:
+
+- React.
+- TypeScript.
+- Biblioteca de visualização gráfica compatível com grafos.
+- Biblioteca de gráficos temporais.
+- WebSocket ou Server-Sent Events para atualização de eventos.
+- Web Audio API para reprodução e captura de áudio quando suportada.
+- MediaRecorder quando compatível com o navegador.
+- FastAPI para APIs.
+- PostgreSQL para sessões e metadados.
+- Armazenamento de arquivos com controle de acesso.
+- WebSocket ou HTTP streaming para mensagens progressivas.
+
+Criar interfaces separadas:
+
+- ChatService.
+- ConversationService.
+- SpeechRecognitionService.
+- SpeechSynthesisService.
+- NeuralTrainingService.
+- NeuralMetricsService.
+- ArchitectureVisualizationService.
+- BenchmarkService.
+- ModelRegistryService.
+- NetworkOperationsService.
+
+A GUI nunca deverá acessar diretamente parâmetros de execução de equipamentos.
+
+## 16.7 API e eventos
+
+Definir endpoints e eventos documentados, incluindo:
+
+- Criar e consultar conversas.
+- Enviar mensagem.
+- Consultar histórico.
+- Enviar anexos.
+- Obter estado do treinamento.
+- Consultar métricas.
+- Consultar arquitetura.
+- Listar experimentos.
+- Listar checkpoints.
+- Iniciar, pausar e cancelar experimentos.
+- Consultar resultados de benchmarks.
+
+Os endpoints que controlam o treinamento deverão possuir autenticação, autorização, validação de parâmetros e limites de recursos.
+
+Publicar eventos de treinamento por um canal de streaming, contendo timestamp, experiment_id, model_version, global_step e métricas disponíveis.
+
+Evitar transmitir pesos completos ou dados sensíveis pelo canal de observabilidade.
+
+## 16.8 Segurança
+
+Implementar:
+
+- Autenticação.
+- RBAC.
+- Proteção contra CSRF quando aplicável.
+- Validação de uploads.
+- Limites de tamanho e duração de áudio.
+- Proteção contra injeção de instruções.
+- Isolamento de sessões.
+- Controle de acesso a checkpoints.
+- Auditoria das operações.
+- Proteção de credenciais.
+- Políticas de retenção.
+- Consentimento para recursos de áudio.
+- Separação entre treinamento, homologação e produção.
+
+O modo de voz poderá solicitar diagnósticos, mas não poderá autorizar implicitamente alterações em equipamentos.
+
+Uma ordem falada deverá seguir os mesmos mecanismos de confirmação e autorização de uma ordem digitada.
+
+## 16.9 Critérios de aceitação
+
+A interface será considerada funcional quando:
+
+1. O usuário conseguir manter conversas por texto.
+2. O usuário conseguir falar e receber transcrição.
+3. A IA conseguir responder por áudio.
+4. A conversa continuar entre turnos sem perder o contexto relevante.
+5. A resposta puder ser interrompida.
+6. O painel mostrar métricas reais de treinamento.
+7. A arquitetura neural puder ser inspecionada graficamente.
+8. Checkpoints e experimentos puderem ser consultados.
+9. As métricas corresponderem ao backend.
+10. O usuário conseguir distinguir fatos documentados de inferências.
+11. O acesso às operações estiver protegido por permissões.
+12. Nenhuma ação em produção puder ser executada apenas por uma interação conversacional não autorizada.
+
+Implementar testes automatizados e demonstrar cada requisito antes de declarar a funcionalidade concluída.
+
+## 16.10 Ordem de implementação
+
+Fase A: layout da aplicação e chat textual.
+
+Fase B: API conversacional e persistência do histórico.
+
+Fase C: integração do chat com o modelo neural próprio.
+
+Fase D: painel de arquitetura e métricas reais.
+
+Fase E: treinamento, experimentos e checkpoints.
+
+Fase F: reconhecimento e síntese de áudio.
+
+Fase G: conversação contínua com interrupção e detecção de fim de fala.
+
+Fase H: integração com diagnóstico de redes.
+
+Fase I: operações de rede controladas e autorizadas.
+
+Cada fase deverá entregar código funcional, testes, documentação e demonstração, sem utilizar dados fictícios para simular funcionalidades já implementadas.

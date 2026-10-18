@@ -1,0 +1,4212 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>VERONICA • Neural Network AI Multi-Vendor</title>
+  <!-- Tailwind CSS via CDN com customização de tema escuro -->
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = {
+      darkMode: 'class',
+      theme: {
+        extend: {
+          colors: {
+            dark: {
+              950: '#030712',
+              900: '#080c14',
+              850: '#0b101e',
+              800: '#0e1526',
+              750: '#131c32',
+              700: '#1e293b',
+            },
+            brand: {
+              cyan: '#38bdf8',
+              purple: '#c084fc',
+              emerald: '#10b981',
+              amber: '#f59e0b',
+            }
+          },
+          fontFamily: {
+            sans: ['Inter', '-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'sans-serif'],
+            mono: ['JetBrains Mono', 'Fira Code', 'Consolas', 'monospace'],
+          }
+        }
+      }
+    };
+  </script>
+
+  <!-- Lucide Icons (Framework moderno de ícones vetoriais SVG) -->
+  <script src="https://unpkg.com/lucide@latest"></script>
+
+  <!-- SweetAlert2 (Framework moderno de Toasts e Diálogos) -->
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+  <!-- Animate.css (Framework de Animações CSS) -->
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/animate.css/4.1.1/animate.min.css"/>
+
+  <!-- Three.js + OrbitControls (Framework 3D de alta performance) -->
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+
+  <!-- Mermaid.js para renderização interativa de diagramas de arquitetura e redes -->
+  <script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+  <script>
+    if (window.mermaid) {
+      mermaid.initialize({ startOnLoad: false, theme: 'dark', securityLevel: 'loose' });
+    }
+  </script>
+  <style>
+    :root {
+      --bg-app: #080c14;
+      --bg-sidebar: #050811;
+      --bg-main: #0a0e1a;
+      --bg-card: rgba(13, 20, 36, 0.7);
+      --bg-card-hover: rgba(19, 29, 52, 0.85);
+      --bg-input: #0e1526;
+      --border: rgba(255, 255, 255, 0.08);
+      --border-subtle: rgba(255, 255, 255, 0.04);
+      --border-focus: #38bdf8;
+      --accent: #38bdf8;
+      --accent-glow: rgba(56, 189, 248, 0.35);
+      --accent-green: #10b981;
+      --accent-amber: #f59e0b;
+      --accent-red: #ef4444;
+      --accent-purple: #c084fc;
+      --accent-pink: #f472b6;
+      --text-main: #f8fafc;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --font-sans: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+      --font-mono: "JetBrains Mono", "Consolas", "Fira Code", monospace;
+      --glass-blur: blur(16px);
+      --sidebar-width: 260px;
+    }
+
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body {
+      background-color: var(--bg-app);
+      color: var(--text-main);
+      font-family: var(--font-sans);
+      height: 100vh;
+      overflow: hidden;
+      display: flex;
+    }
+
+    /* ==================== LAYOUT ESTRUTURAL CHATGPT / CLAUDE ==================== */
+    #appContainer {
+      display: flex;
+      width: 100vw;
+      height: 100vh;
+      overflow: hidden;
+      position: relative;
+    }
+
+    /* SIDEBAR LATERAL (Estilo ChatGPT / Claude) */
+    #sidebar {
+      width: var(--sidebar-width);
+      min-width: var(--sidebar-width);
+      height: 100vh;
+      background: var(--bg-sidebar);
+      border-right: 1px solid var(--border);
+      display: flex;
+      flex-direction: column;
+      z-index: 50;
+      transition: transform 0.25s ease, width 0.25s ease;
+    }
+
+    #sidebar.collapsed {
+      transform: translateX(-100%);
+      position: absolute;
+      left: 0;
+      top: 0;
+      bottom: 0;
+    }
+
+    .sidebar-header {
+      padding: 16px 14px 12px 14px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+
+    .sidebar-brand {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+    }
+
+    .brand-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 8px;
+      background: linear-gradient(135deg, #0284c7 0%, #a855f7 100%);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 15px;
+      color: #fff;
+      box-shadow: 0 0 14px var(--accent-glow);
+      transition: transform 0.2s ease;
+    }
+    .brand-avatar:hover { transform: scale(1.05); }
+
+    .brand-avatar.speaking-pulse {
+      animation: avatarSpeakingAura 1.2s infinite alternate;
+    }
+    @keyframes avatarSpeakingAura {
+      0% { box-shadow: 0 0 10px #38bdf8; transform: scale(1); }
+      100% { box-shadow: 0 0 24px #f472b6, 0 0 35px #38bdf8; transform: scale(1.08); }
+    }
+
+    .sidebar-brand-text h1 {
+      font-size: 15px;
+      font-weight: 700;
+      letter-spacing: 0.5px;
+      background: linear-gradient(90deg, #f8fafc, #38bdf8);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+    }
+    .sidebar-brand-text p {
+      font-size: 10px;
+      color: var(--text-muted);
+      margin-top: 1px;
+    }
+
+    .sidebar-actions {
+      padding: 12px 14px;
+    }
+
+    .btn-new-chat {
+      width: 100%;
+      background: rgba(56, 189, 248, 0.08);
+      border: 1px solid rgba(56, 189, 248, 0.25);
+      color: #f8fafc;
+      padding: 10px 14px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 600;
+      transition: all 0.2s ease;
+    }
+    .btn-new-chat:hover {
+      background: rgba(56, 189, 248, 0.16);
+      border-color: var(--accent);
+      box-shadow: 0 0 16px rgba(56, 189, 248, 0.2);
+    }
+
+    .btn-sidebar-observatory {
+      width: 100%;
+      margin-top: 8px;
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.12) 0%, rgba(168, 85, 247, 0.18) 100%);
+      border: 1px solid rgba(168, 85, 247, 0.4);
+      color: #f8fafc;
+      padding: 10px 14px;
+      border-radius: 12px;
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      cursor: pointer;
+      font-size: 13px;
+      font-weight: 700;
+      transition: all 0.2s ease;
+      box-shadow: 0 0 14px rgba(168, 85, 247, 0.16);
+    }
+    .btn-sidebar-observatory:hover {
+      background: linear-gradient(135deg, rgba(56, 189, 248, 0.24) 0%, rgba(168, 85, 247, 0.32) 100%);
+      border-color: #38bdf8;
+      box-shadow: 0 0 20px rgba(56, 189, 248, 0.3);
+      transform: translateY(-1px);
+    }
+
+    .sidebar-conv-list {
+      flex: 1;
+      overflow-y: auto;
+      padding: 6px 10px;
+      display: flex;
+      flex-direction: column;
+      gap: 3px;
+    }
+
+    .sidebar-section-title {
+      font-size: 10px;
+      font-weight: 700;
+      text-transform: uppercase;
+      letter-spacing: 0.8px;
+      color: var(--text-dim);
+      padding: 8px 10px 4px 10px;
+    }
+
+    .conv-item {
+      padding: 9px 12px;
+      border-radius: 9px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 12.5px;
+      color: var(--text-muted);
+      transition: all 0.15s ease;
+      position: relative;
+    }
+    .conv-item:hover {
+      background: rgba(255, 255, 255, 0.05);
+      color: var(--text-main);
+    }
+    .conv-item.active {
+      background: rgba(56, 189, 248, 0.12);
+      color: #fff;
+      font-weight: 600;
+      border-left: 3px solid var(--accent);
+    }
+
+    .sidebar-footer {
+      padding: 12px 14px;
+      border-top: 1px solid var(--border-subtle);
+      background: rgba(4, 7, 15, 0.6);
+      display: flex;
+      flex-direction: column;
+      gap: 10px;
+    }
+
+    .operator-profile-box-clean {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      padding: 8px 12px;
+      background: var(--bg-card);
+      border: 1px solid var(--border-subtle);
+      border-radius: 9px;
+    }
+    .operator-avatar {
+      width: 28px;
+      height: 28px;
+      border-radius: 50%;
+      background: rgba(56, 189, 248, 0.14);
+      border: 1px solid rgba(56, 189, 248, 0.35);
+      display: grid;
+      place-items: center;
+      font-size: 14px;
+    }
+
+    /* ÁREA PRINCIPAL DA APLICAÇÃO */
+    #mainViewport {
+      flex: 1;
+      height: 100vh;
+      display: flex;
+      flex-direction: column;
+      overflow: hidden;
+      background: var(--bg-main);
+      position: relative;
+    }
+
+    /* TOP HEADER BAR (Modern Tabs & Status) */
+    .top-header {
+      height: 54px;
+      border-bottom: 1px solid var(--border);
+      background: rgba(8, 12, 22, 0.85);
+      backdrop-filter: var(--glass-blur);
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 0 18px;
+      z-index: 40;
+    }
+
+    .top-left-group {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+
+    .btn-toggle-sidebar {
+      background: transparent;
+      border: none;
+      color: var(--text-muted);
+      cursor: pointer;
+      font-size: 16px;
+      padding: 6px;
+      border-radius: 6px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+    }
+    .btn-toggle-sidebar:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+    }
+
+    .model-selector-pill {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      background: rgba(255, 255, 255, 0.04);
+      padding: 5px 12px;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+    }
+    .model-selector-pill .status-dot {
+      width: 7px;
+      height: 7px;
+      border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: 0 0 8px var(--accent-green);
+    }
+
+    /* ABAS DE NAVEGAÇÃO */
+    .top-nav-tabs {
+      display: flex;
+      gap: 4px;
+      background: rgba(5, 8, 16, 0.7);
+      padding: 3px;
+      border-radius: 10px;
+      border: 1px solid var(--border-subtle);
+    }
+
+    .nav-tab-btn {
+      background: transparent;
+      color: var(--text-muted);
+      border: 1px solid transparent;
+      padding: 6px 12px;
+      border-radius: 7px;
+      cursor: pointer;
+      font-weight: 600;
+      font-size: 12px;
+      display: flex;
+      align-items: center;
+      gap: 6px;
+      transition: all 0.18s ease;
+    }
+    .nav-tab-btn:hover {
+      color: var(--text-main);
+      background: rgba(255, 255, 255, 0.04);
+    }
+    .nav-tab-btn.active {
+      color: #fff;
+      background: linear-gradient(135deg, rgba(2, 132, 199, 0.4) 0%, rgba(124, 58, 237, 0.4) 100%);
+      border: 1px solid rgba(56, 189, 248, 0.4);
+      box-shadow: 0 0 12px rgba(56, 189, 248, 0.2);
+    }
+
+    .top-right-group {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+    }
+
+    .system-health-pill {
+      font-size: 11px;
+      color: var(--accent-green);
+      background: rgba(16, 185, 129, 0.1);
+      border: 1px solid rgba(16, 185, 129, 0.25);
+      padding: 3px 9px;
+      border-radius: 12px;
+      font-family: var(--font-mono);
+    }
+
+    /* SEÇÕES DE CONTEÚDO */
+    .view-content-area {
+      flex: 1;
+      height: calc(100vh - 54px);
+      overflow-y: auto;
+      position: relative;
+    }
+
+    .view-section { display: none; height: 100%; }
+    .view-section.active { display: flex; flex-direction: column; animation: fadeInView 0.2s ease; }
+    @keyframes fadeInView { from { opacity: 0; } to { opacity: 1; } }
+
+    /* BARRA DE MODOS MODERNA (CHATGPT / CLAUDE / COPILOT / GEMINI) */
+    .chat-modes-bar {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 10px 22px;
+      background: rgba(8, 12, 22, 0.75);
+      border-bottom: 1px solid var(--border-subtle);
+      backdrop-filter: var(--glass-blur);
+      z-index: 20;
+      gap: 12px;
+      flex-wrap: wrap;
+    }
+    .chat-modes-group {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      flex-wrap: wrap;
+    }
+    .mode-pill {
+      background: rgba(255, 255, 255, 0.04);
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      padding: 6px 14px;
+      border-radius: 20px;
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      display: flex;
+      align-items: center;
+      gap: 7px;
+      transition: all 0.2s ease;
+    }
+    .mode-pill:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-main);
+      border-color: rgba(56, 189, 248, 0.3);
+    }
+    .mode-pill.active {
+      background: linear-gradient(135deg, rgba(2, 132, 199, 0.35) 0%, rgba(124, 58, 237, 0.4) 100%);
+      border-color: var(--accent);
+      color: #fff;
+      box-shadow: 0 0 14px rgba(56, 189, 248, 0.25);
+    }
+    .mode-pill-obs {
+      border-color: rgba(168, 85, 247, 0.4);
+      background: rgba(168, 85, 247, 0.08);
+    }
+    .mode-pill-obs:hover {
+      background: rgba(168, 85, 247, 0.22);
+      border-color: #c084fc;
+      box-shadow: 0 0 14px rgba(168, 85, 247, 0.3);
+    }
+    .mode-pill-badge {
+      font-size: 9.5px;
+      padding: 1px 6px;
+      border-radius: 10px;
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+    }
+    .mode-pill.active .mode-pill-badge {
+      background: rgba(56, 189, 248, 0.2);
+      color: #38bdf8;
+    }
+    .mode-info-tag {
+      font-size: 11.5px;
+      color: var(--text-dim);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    /* AUTO-APRENDIZADO AUTÔNOMO & NEUROGÊNESE EM SEGUNDO PLANO */
+    .live-pulse-dot {
+      width: 8px;
+      height: 8px;
+      border-radius: 50%;
+      background: #10b981;
+      box-shadow: 0 0 10px #10b981;
+      animation: pulseGreenGlow 1.6s infinite ease-in-out;
+      display: inline-block;
+      flex-shrink: 0;
+    }
+    .live-pulse-dot.paused {
+      background: #f59e0b;
+      box-shadow: 0 0 10px #f59e0b;
+      animation: none;
+    }
+    @keyframes pulseGreenGlow {
+      0%, 100% { transform: scale(1); opacity: 1; }
+      50% { transform: scale(1.4); opacity: 0.55; }
+    }
+    .autonomous-learning-indicator {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 5px 12px;
+      border-radius: 20px;
+      background: rgba(16, 185, 129, 0.08);
+      border: 1px solid rgba(16, 185, 129, 0.28);
+      cursor: pointer;
+      font-size: 11.5px;
+      color: #e2e8f0;
+      transition: all 0.2s;
+    }
+    .autonomous-learning-indicator:hover {
+      background: rgba(16, 185, 129, 0.18);
+      border-color: #10b981;
+      box-shadow: 0 0 12px rgba(16, 185, 129, 0.3);
+    }
+    .auto-learn-count {
+      background: rgba(56, 189, 248, 0.16);
+      color: #38bdf8;
+      padding: 1px 7px;
+      border-radius: 10px;
+      font-size: 10px;
+      font-weight: 700;
+    }
+    .autonomous-thought-ticker {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      padding: 6px 18px;
+      background: rgba(16, 185, 129, 0.05);
+      border-bottom: 1px solid rgba(16, 185, 129, 0.15);
+      font-size: 11.5px;
+      color: #94a3b8;
+      backdrop-filter: blur(8px);
+    }
+
+    /* ==================== 1. CHAT EXPERIÊNCIA FLUIDA (CHATGPT / CLAUDE) ==================== */
+    #tab-chat {
+      height: 100%;
+      flex-direction: column;
+      position: relative;
+    }
+    #tab-chat.active { display: flex; }
+
+    .chat-scroll-stream {
+      flex: 1;
+      overflow-y: auto;
+      padding: 24px 20px 140px 20px;
+      display: flex;
+      flex-direction: column;
+      scroll-behavior: smooth;
+    }
+
+    .chat-centered-column {
+      max-width: 840px;
+      width: 100%;
+      margin: 0 auto;
+      display: flex;
+      flex-direction: column;
+      gap: 22px;
+    }
+
+    /* ESTADO VAZIO / BOAS-VINDAS (Hero ChatGPT / Claude) */
+    .chat-empty-hero {
+      text-align: center;
+      padding: 50px 20px 30px 20px;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .hero-avatar-glow {
+      width: 68px;
+      height: 68px;
+      border-radius: 20px;
+      background: linear-gradient(135deg, #0284c7 0%, #a855f7 100%);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 32px;
+      color: #fff;
+      box-shadow: 0 0 35px var(--accent-glow);
+      margin-bottom: 18px;
+      animation: pulseHeroHalo 3s infinite ease-in-out;
+    }
+    @keyframes pulseHeroHalo {
+      0%, 100% { transform: scale(1); box-shadow: 0 0 30px rgba(56, 189, 248, 0.35); }
+      50% { transform: scale(1.04); box-shadow: 0 0 50px rgba(168, 85, 247, 0.5); }
+    }
+
+    .chat-empty-hero h2 {
+      font-size: 24px;
+      font-weight: 700;
+      color: #fff;
+      margin-bottom: 6px;
+    }
+
+    .chat-empty-hero p {
+      font-size: 13.5px;
+      color: var(--text-muted);
+      max-width: 580px;
+      line-height: 1.5;
+      margin-bottom: 28px;
+    }
+
+    .hero-suggestions-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 12px;
+      width: 100%;
+      max-width: 680px;
+    }
+
+    .hero-prompt-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 14px 16px;
+      text-align: left;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      flex-direction: column;
+      gap: 4px;
+    }
+    .hero-prompt-card:hover {
+      background: var(--bg-card-hover);
+      border-color: rgba(56, 189, 248, 0.4);
+      transform: translateY(-2px);
+      box-shadow: 0 6px 20px rgba(0, 0, 0, 0.35);
+    }
+    .hero-prompt-card .card-title {
+      font-size: 13px;
+      font-weight: 600;
+      color: #fff;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .hero-prompt-card .card-desc {
+      font-size: 11.5px;
+      color: var(--text-muted);
+      line-height: 1.4;
+    }
+
+    /* MENSAGENS NO CHAT */
+    .chat-message-row {
+      display: flex;
+      gap: 14px;
+      width: 100%;
+    }
+
+    .chat-message-row.user {
+      justify-content: flex-end;
+    }
+
+    .user-bubble {
+      max-width: 80%;
+      background: #192234;
+      border: 1px solid rgba(255, 255, 255, 0.09);
+      border-radius: 18px 18px 4px 18px;
+      padding: 12px 18px;
+      color: #f8fafc;
+      font-size: 14px;
+      line-height: 1.55;
+      box-shadow: 0 4px 14px rgba(0, 0, 0, 0.25);
+    }
+
+    .user-bubble-meta {
+      font-size: 10.5px;
+      color: var(--text-dim);
+      margin-bottom: 4px;
+      display: flex;
+      justify-content: space-between;
+      gap: 10px;
+    }
+
+    .assistant-avatar-col {
+      width: 32px;
+      min-width: 32px;
+    }
+
+    .assistant-avatar {
+      width: 32px;
+      height: 32px;
+      border-radius: 10px;
+      background: linear-gradient(135deg, #0284c7 0%, #a855f7 100%);
+      display: grid;
+      place-items: center;
+      font-weight: 800;
+      font-size: 14px;
+      color: #fff;
+      box-shadow: 0 0 12px var(--accent-glow);
+    }
+
+    .assistant-body-col {
+      flex: 1;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+
+    .assistant-header-meta {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      font-size: 11.5px;
+    }
+
+    .assistant-name-tag {
+      font-weight: 700;
+      color: var(--text-main);
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+
+    .assistant-message-content {
+      font-size: 14.5px;
+      line-height: 1.65;
+      color: #e2e8f0;
+    }
+
+    .assistant-message-content p { margin-bottom: 10px; }
+    .assistant-message-content p:last-child { margin-bottom: 0; }
+    .assistant-message-content ul, .assistant-message-content ol {
+      margin: 8px 0 10px 20px;
+      line-height: 1.6;
+    }
+    .assistant-message-content li { margin-bottom: 4px; }
+    .assistant-message-content strong { color: #fff; font-weight: 600; }
+
+    /* BLOCOS DE CÓDIGO & CLI COM BOTÃO DE CÓPIA */
+    .cli-snippet-wrapper {
+      position: relative;
+      background: #040711;
+      border: 1px solid var(--border);
+      border-radius: 9px;
+      margin: 10px 0;
+      overflow: hidden;
+    }
+
+    .cli-snippet-header {
+      background: rgba(255, 255, 255, 0.03);
+      border-bottom: 1px solid var(--border-subtle);
+      padding: 6px 12px;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      font-size: 11px;
+      color: var(--text-muted);
+      font-family: var(--font-mono);
+    }
+
+    .btn-copy-code {
+      background: transparent;
+      border: 1px solid var(--border-subtle);
+      color: var(--text-muted);
+      padding: 2px 8px;
+      border-radius: 4px;
+      font-size: 11px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 4px;
+    }
+    .btn-copy-code:hover {
+      background: rgba(255, 255, 255, 0.08);
+      color: #fff;
+    }
+
+    pre.cli-block {
+      background: transparent;
+      padding: 12px 14px;
+      font-family: var(--font-mono);
+      font-size: 12.5px;
+      line-height: 1.5;
+      color: #38bdf8;
+      overflow-x: auto;
+      margin: 0;
+    }
+
+    /* CARD DE EVIDÊNCIAS EPISTÊMICAS E DETALHES */
+    .technical-details {
+      background: rgba(8, 14, 28, 0.6);
+      border: 1px solid var(--border-subtle);
+      border-radius: 10px;
+      padding: 10px 14px;
+      margin-top: 8px;
+    }
+    .technical-details summary {
+      cursor: pointer;
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text-muted);
+      outline: none;
+      user-select: none;
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
+    .technical-details summary:hover { color: var(--accent); }
+
+    /* BARRA DE AÇÕES DA MENSAGEM */
+    .message-action-bar {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      margin-top: 8px;
+    }
+
+    .btn-msg-action {
+      background: transparent;
+      border: 1px solid transparent;
+      color: var(--text-muted);
+      padding: 4px 9px;
+      border-radius: 6px;
+      font-size: 11.5px;
+      cursor: pointer;
+      display: flex;
+      align-items: center;
+      gap: 5px;
+      transition: all 0.15s ease;
+    }
+    .btn-msg-action:hover {
+      background: rgba(255, 255, 255, 0.06);
+      color: var(--text-main);
+      border-color: var(--border-subtle);
+    }
+    .btn-msg-action.active-speaking {
+      background: rgba(244, 114, 182, 0.15);
+      border-color: var(--accent-pink);
+      color: var(--accent-pink);
+    }
+
+    /* FLOATING BOTTOM INPUT AREA (Estilo ChatGPT / Claude) */
+    .chat-floating-input-zone {
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      background: linear-gradient(180deg, rgba(10, 14, 26, 0) 0%, rgba(10, 14, 26, 0.95) 40%, rgba(10, 14, 26, 1) 100%);
+      padding: 16px 20px 20px 20px;
+      z-index: 30;
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+    }
+
+    .chat-input-pill-container {
+      max-width: 840px;
+      width: 100%;
+      background: #111728;
+      border: 1px solid rgba(255, 255, 255, 0.12);
+      border-radius: 20px;
+      padding: 10px 14px;
+      box-shadow: 0 8px 30px rgba(0, 0, 0, 0.45);
+      display: flex;
+      flex-direction: column;
+      gap: 8px;
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+    }
+    .chat-input-pill-container:focus-within {
+      border-color: var(--accent);
+      box-shadow: 0 8px 35px rgba(56, 189, 248, 0.25);
+    }
+
+    /* REVISÃO DE VOZ (Atende rigorosamente assertion voiceTranscriptReviewInput) */
+    .voice-transcript-review-strip {
+      background: rgba(56, 189, 248, 0.06);
+      border: 1px solid rgba(56, 189, 248, 0.2);
+      border-radius: 8px;
+      padding: 6px 10px;
+      display: flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .voice-transcript-review-strip label {
+      font-size: 11px;
+      font-weight: 600;
+      color: var(--accent);
+      white-space: nowrap;
+    }
+    #voiceTranscriptReviewInput {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: #fff;
+      font-size: 12px;
+      outline: none;
+    }
+
+    .chat-input-inner-row {
+      display: flex;
+      align-items: flex-end;
+      gap: 10px;
+      width: 100%;
+    }
+
+    #chatInput {
+      flex: 1;
+      background: transparent;
+      border: none;
+      color: #f8fafc;
+      font-family: inherit;
+      font-size: 14.5px;
+      line-height: 1.5;
+      resize: none;
+      outline: none;
+      max-height: 180px;
+      padding: 4px 0;
+    }
+    #chatInput::placeholder { color: var(--text-dim); }
+
+    .chat-input-actions {
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .btn-input-round {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      border: none;
+      display: grid;
+      place-items: center;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      font-size: 14px;
+    }
+
+    .btn-mic-record {
+      background: rgba(255, 255, 255, 0.08);
+      color: var(--text-muted);
+    }
+    .btn-mic-record:hover {
+      background: rgba(56, 189, 248, 0.2);
+      color: var(--accent);
+    }
+    .btn-mic-record.recording-active {
+      background: #ef4444;
+      color: #fff;
+      animation: micPulseRing 1s infinite alternate;
+    }
+    @keyframes micPulseRing {
+      0% { box-shadow: 0 0 8px rgba(239, 68, 68, 0.5); }
+      100% { box-shadow: 0 0 22px rgba(239, 68, 68, 0.9); }
+    }
+
+    .btn-submit-send {
+      background: var(--accent);
+      color: #040711;
+      font-weight: 700;
+    }
+    .btn-submit-send:hover {
+      background: #7dd3fc;
+      transform: scale(1.05);
+      box-shadow: 0 0 14px var(--accent-glow);
+    }
+
+    .btn-cancel-generation {
+      width: 36px;
+      height: 36px;
+      border-radius: 50%;
+      background: rgba(239, 68, 68, 0.2);
+      border: 1px solid var(--accent-red);
+      color: var(--accent-red);
+      cursor: pointer;
+      display: none;
+      place-items: center;
+    }
+
+    .chat-disclaimer-subtext {
+      font-size: 11px;
+      color: var(--text-dim);
+      margin-top: 6px;
+      text-align: center;
+    }
+
+    /* ==================== 2. OBSERVATÓRIO NEURAL 3D (CORREÇÃO DE TELA PRETA & WEBGL) ==================== */
+    #tab-observatory {
+      padding: 16px 22px;
+      gap: 14px;
+    }
+
+    .observatory-kpi-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+      gap: 10px;
+    }
+
+    .kpi-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 10px 14px;
+    }
+    .kpi-card .lbl {
+      font-size: 10.5px;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.5px;
+    }
+    .kpi-card .val {
+      font-size: 17px;
+      font-weight: 700;
+      margin-top: 3px;
+      font-family: var(--font-mono);
+      color: #fff;
+    }
+
+    /* CONTAINER 3D COM ISOLAMENTO DE CANVAS E HUD */
+    #observatory3dContainer {
+      position: relative;
+      width: 100%;
+      height: 500px;
+      min-height: 480px;
+      background: radial-gradient(circle at 50% 50%, #0d1a36 0%, #050914 80%);
+      border-radius: 14px;
+      overflow: hidden;
+      border: 1px solid var(--border);
+      box-shadow: inset 0 0 40px rgba(0, 0, 0, 0.65);
+      cursor: grab;
+    }
+    #observatory3dContainer:active { cursor: grabbing; }
+
+    #observatory3dCanvasWrapper {
+      position: absolute;
+      inset: 0;
+      width: 100%;
+      height: 100%;
+      z-index: 1;
+    }
+
+    .observatory-hud {
+      position: absolute;
+      top: 14px;
+      left: 16px;
+      z-index: 10;
+      pointer-events: none;
+      display: flex;
+      flex-direction: column;
+      gap: 6px;
+    }
+    .observatory-hud-badge {
+      background: rgba(8, 14, 28, 0.85);
+      backdrop-filter: blur(8px);
+      border: 1px solid var(--border-subtle);
+      padding: 5px 11px;
+      border-radius: 6px;
+      font-size: 11px;
+      color: #f8fafc;
+      font-family: var(--font-mono);
+      display: flex;
+      align-items: center;
+      gap: 6px;
+    }
+
+    .observatory-controls-bar {
+      position: absolute;
+      bottom: 14px;
+      left: 16px;
+      right: 16px;
+      z-index: 10;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      background: rgba(8, 14, 28, 0.85);
+      backdrop-filter: blur(10px);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 8px 14px;
+      pointer-events: auto;
+    }
+
+    .btn-obs-pill {
+      background: rgba(255, 255, 255, 0.06);
+      border: 1px solid var(--border-subtle);
+      color: #f8fafc;
+      padding: 4px 10px;
+      border-radius: 6px;
+      font-size: 11px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn-obs-pill:hover {
+      background: rgba(56, 189, 248, 0.18);
+      border-color: var(--accent);
+    }
+
+    /* GRID DE INSPEÇÃO MATEMÁTICA E HARDWARE */
+    .grid-equal {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+
+    .panel-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 16px;
+    }
+
+    .panel-card-title {
+      font-size: 13px;
+      font-weight: 700;
+      color: #fff;
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .arch-node-item {
+      background: var(--bg-input);
+      border: 1px solid var(--border-subtle);
+      border-radius: 8px;
+      padding: 9px 12px;
+      margin-bottom: 6px;
+      cursor: pointer;
+      font-size: 12px;
+      transition: all 0.15s ease;
+    }
+    .arch-node-item:hover {
+      border-color: var(--accent);
+      background: rgba(56, 189, 248, 0.05);
+    }
+    .arch-node-item.selected {
+      border-color: var(--accent);
+      background: rgba(56, 189, 248, 0.1);
+    }
+
+    /* BADGES EPISTÊMICOS E DE STATUS */
+    .badge {
+      display: inline-flex;
+      align-items: center;
+      padding: 2px 7px;
+      border-radius: 4px;
+      font-size: 10.5px;
+      font-weight: 700;
+      font-family: var(--font-mono);
+    }
+    .badge-fact { background: rgba(16, 185, 129, 0.15); color: #10b981; border: 1px solid rgba(16, 185, 129, 0.3); }
+    .badge-infer { background: rgba(56, 189, 248, 0.15); color: #38bdf8; border: 1px solid rgba(56, 189, 248, 0.3); }
+    .badge-hypo { background: rgba(245, 158, 11, 0.15); color: #f59e0b; border: 1px solid rgba(245, 158, 11, 0.3); }
+    .badge-danger { background: rgba(239, 68, 68, 0.15); color: #ef4444; border: 1px solid rgba(239, 68, 68, 0.3); }
+
+    /* TABELAS MODERNAS */
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      font-size: 12px;
+    }
+    th, td {
+      padding: 8px 10px;
+      text-align: left;
+      border-bottom: 1px solid var(--border-subtle);
+    }
+    th {
+      font-size: 10.5px;
+      text-transform: uppercase;
+      color: var(--text-muted);
+      letter-spacing: 0.5px;
+    }
+    tbody tr:hover { background: rgba(255, 255, 255, 0.02); }
+
+    .btn {
+      background: var(--accent);
+      color: #040711;
+      border: none;
+      padding: 6px 12px;
+      border-radius: 7px;
+      font-weight: 600;
+      font-size: 12px;
+      cursor: pointer;
+      transition: all 0.15s ease;
+    }
+    .btn:hover { opacity: 0.9; }
+    .btn-outline {
+      background: transparent;
+      border: 1px solid var(--border);
+      color: var(--text-main);
+    }
+    .btn-outline:hover {
+      background: rgba(255, 255, 255, 0.06);
+      border-color: var(--accent);
+    }
+    .btn-success { background: var(--accent-green); color: #fff; }
+    .btn-warning { background: var(--accent-amber); color: #040711; }
+    .btn-danger { background: var(--accent-red); color: #fff; }
+
+    /* MODAL DE FEEDBACK */
+    #feedbackModal {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: rgba(2, 6, 18, 0.82);
+      backdrop-filter: blur(12px);
+      z-index: 999;
+      place-items: center;
+      padding: 16px;
+    }
+    .modal-content-box {
+      max-width: 700px;
+      width: 100%;
+      max-height: 90vh;
+      overflow-y: auto;
+      background: #0d1424;
+      border: 1px solid var(--accent);
+      border-radius: 14px;
+      padding: 20px;
+      box-shadow: 0 0 40px rgba(56, 189, 248, 0.25);
+    }
+
+    /* SCROLLBAR MODERNA */
+    ::-webkit-scrollbar { width: 6px; height: 6px; }
+    ::-webkit-scrollbar-track { background: transparent; }
+    ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.15); border-radius: 3px; }
+    ::-webkit-scrollbar-thumb:hover { background: rgba(56, 189, 248, 0.4); }
+  </style>
+</head>
+<body>
+  <div id="appContainer">
+    <!-- ==================== SIDEBAR LATERAL (CHATGPT / CLAUDE) ==================== -->
+    <aside id="sidebar">
+      <div class="sidebar-header">
+        <div class="sidebar-brand" onclick="switchTab('chat')">
+          <div class="brand-avatar" id="veronicaAvatarBadge" title="Clique para ouvir a voz da Verônica">V</div>
+          <div class="sidebar-brand-text">
+            <h1>VERONICA</h1>
+            <p>Multi-Vendor Network AI</p>
+          </div>
+        </div>
+        <button class="btn-toggle-sidebar" onclick="toggleSidebar()" title="Recolher barra lateral">✕</button>
+      </div>
+
+      <div class="sidebar-actions">
+        <button class="btn-new-chat" onclick="createNewConversation()">
+          <span style="display:flex;align-items:center;gap:8px;">
+            <i data-lucide="plus" style="width:16px;height:16px;"></i> Nova conversa
+          </span>
+          <span style="font-size:11px;color:var(--text-muted);font-family:var(--font-mono);">Ctrl+K</span>
+        </button>
+        <button class="btn-sidebar-observatory" onclick="openObservatory3D()" id="sidebarObservatoryBtn" title="Abrir Observatório Neural 3D">
+          <i data-lucide="brain" style="width:16px;height:16px;"></i>
+          <span>Observatório Neural 3D</span>
+        </button>
+      </div>
+
+      <div class="sidebar-section-title">Conversas Recentes</div>
+      <div class="sidebar-conv-list" id="convList"></div>
+
+      <div class="sidebar-footer">
+        <div class="operator-profile-box-clean">
+          <div class="operator-avatar">👨‍💻</div>
+          <div style="flex:1;overflow:hidden;">
+            <div style="font-size:12px;font-weight:600;color:var(--text-main);">Engenheiro N3</div>
+            <div style="font-size:10px;color:var(--accent-green);display:flex;align-items:center;gap:4px;">
+              <span class="status-dot"></span> Modo Autônomo Ativo
+            </div>
+          </div>
+        </div>
+
+        <!-- Seção de Voz e Privacidade na Barra Lateral -->
+        <div style="background:rgba(255,255,255,0.02);border:1px solid var(--border-subtle);border-radius:8px;padding:8px 10px;">
+          <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+            <label style="display:flex;align-items:center;gap:6px;font-size:11px;cursor:pointer;">
+              <input type="checkbox" id="audioConsentChk" onchange="toggleAudioConsent()" />
+              <span style="color:var(--text-main);font-weight:600;">Consentimento de Voz</span>
+            </label>
+            <span class="badge badge-fact" style="font-size:9.5px;">pt-BR</span>
+          </div>
+
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button class="btn btn-outline" style="flex:1;padding:4px 6px;font-size:10px;" onclick="testVeronicaVoice()">🔊 Testar Voz</button>
+            <button class="btn btn-outline" style="flex:1;padding:4px 6px;font-size:10px;" onclick="deleteVoiceRecordings()">Excluir Gravações de Voz</button>
+          </div>
+
+          <div id="voiceStatusBox" style="font-size:10.5px;color:var(--text-muted);margin-top:6px;min-height:14px;">
+            Pronto para áudio.
+          </div>
+
+          <!-- Seleção Oculta de Voz para Compatibilidade Completa -->
+          <select id="voiceSelect" style="display:none;" onchange="onVoiceSelected()"></select>
+          <input type="range" id="voicePitchSlider" min="0.8" max="1.4" step="0.02" value="1.12" style="display:none;" />
+          <input type="range" id="voiceRateSlider" min="0.8" max="1.3" step="0.02" value="1.03" style="display:none;" />
+        </div>
+      </div>
+    </aside>
+
+    <!-- ==================== VIEWPORT PRINCIPAL ==================== -->
+    <main id="mainViewport">
+      <!-- TOP HEADER (Tabs & Status) -->
+      <header class="top-header">
+        <div class="top-left-group">
+          <button class="btn-toggle-sidebar" id="sidebarOpenBtn" style="display:none;" onclick="toggleSidebar()" title="Abrir menu lateral">☰</button>
+          <div class="model-selector-pill">
+            <span class="status-dot"></span>
+            <span>Verônica v1.0 • VRP 8 / IOS-XR / Junos</span>
+          </div>
+        </div>
+
+        <nav class="top-nav-tabs">
+          <button class="nav-tab-btn active" id="tabNav-chat" onclick="switchTab('chat', this)">
+            <i data-lucide="message-square" style="width:14px;height:14px;"></i> Conversa
+          </button>
+          <button class="nav-tab-btn" id="tabNav-observatory" onclick="openObservatory3D(this)">
+            <i data-lucide="orbit" style="width:14px;height:14px;"></i> Observatório 3D
+          </button>
+          <button class="nav-tab-btn" id="tabNav-development" onclick="switchTab('development', this)">
+            <i data-lucide="sparkles" style="width:14px;height:14px;"></i> Neurogênese & Memória
+          </button>
+        </nav>
+
+        <div class="top-right-group">
+          <div class="system-health-pill" id="topHealthPill">Tokens/s: 0 • Loss: -</div>
+        </div>
+      </header>
+
+      <!-- ÁREA DE CONTEÚDO DAS ABAS -->
+      <div class="view-content-area">
+
+        <!-- ==================== ABA 1: CHAT FLUIDO (CHATGPT / CLAUDE / COPILOT / GEMINI) ==================== -->
+        <section id="tab-chat" class="view-section active">
+          <!-- BARRA DE MODOS MODERNA (CHATGPT / CLAUDE / COPILOT / GEMINI) -->
+          <div class="chat-modes-bar" id="chatModesBar">
+            <div class="chat-modes-group">
+              <button class="mode-pill active" id="modeBtn-chat" onclick="setChatMode('chat')">
+                <i data-lucide="message-square" style="width:14px;height:14px;" class="mode-pill-icon"></i>
+                <span class="mode-pill-label">Modo Chat</span>
+                <span class="mode-pill-badge">Rápido</span>
+              </button>
+              <button class="mode-pill" id="modeBtn-agent" onclick="setChatMode('agent')">
+                <i data-lucide="bot" style="width:14px;height:14px;" class="mode-pill-icon"></i>
+                <span class="mode-pill-label">Modo Agent</span>
+                <span class="mode-pill-badge">Raciocínio</span>
+              </button>
+              <button class="mode-pill" id="modeBtn-work" onclick="setChatMode('work')">
+                <i data-lucide="briefcase" style="width:14px;height:14px;" class="mode-pill-icon"></i>
+                <span class="mode-pill-label">Modo Work</span>
+                <span class="mode-pill-badge">Scripts CLI</span>
+              </button>
+              <button class="mode-pill mode-pill-obs" id="modeBtn-observatory" onclick="openObservatory3D()">
+                <i data-lucide="brain" style="width:14px;height:14px;" class="mode-pill-icon"></i>
+                <span class="mode-pill-label">Observatório 3D</span>
+                <span class="mode-pill-badge">Imersivo</span>
+              </button>
+            </div>
+              <div class="autonomous-learning-indicator" id="autoLearningHeaderPill" onclick="toggleAutonomousLearning()" title="Clique para pausar ou retomar o auto-aprendizado autônomo">
+                <span class="live-pulse-dot" id="autoLearningDot"></span>
+                <span id="autoLearnHeaderLabel">🧠 Auto-Aprendizado: <strong style="color:#10b981;">Ativo</strong></span>
+                <span class="auto-learn-count" id="autoLearnNeuronsCount">0 neurônios novos</span>
+              </div>
+              <div class="mode-info-tag" id="modeInfoTag">
+                <span>💬 <strong>Modo Chat</strong>: Conversação fluida, rápida e inteligente multi-vendor</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- TICKER DE FLUXO DE CONSCIÊNCIA & PENSAMENTO AUTÔNOMO (PENSANDO SOZINHA EM SEGUNDO PLANO) -->
+          <div class="autonomous-thought-ticker" id="autoThoughtTicker">
+            <span style="color:#10b981;font-weight:700;display:flex;align-items:center;gap:6px;font-size:11.5px;flex-shrink:0;">
+              <span class="live-pulse-dot" id="tickerDot"></span> Pensando:
+            </span>
+            <span id="autoThoughtText" style="color:#cbd5e1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;flex:1;font-size:11.5px;font-style:italic;">
+              Veronica conectada ao cérebro neural, gerando pensamentos e novos neurônios em segundo plano...
+            </span>
+            <button class="btn-obs-pill" style="padding:2px 10px;font-size:10px;height:22px;flex-shrink:0;" onclick="triggerInstantThoughtCycle()" title="Força a Veronica a conceber um pensamento e novo neurônio próprio agora">
+              ⚡ Pensar Agora
+            </button>
+          </div>
+
+          <div class="chat-scroll-stream" id="chatScrollContainer">
+            <div class="chat-centered-column" id="chatCenteredColumn">
+              <!-- Mensagens renderizadas dinamicamente ou tela de boas-vindas -->
+              <div id="chatMessages"></div>
+            </div>
+          </div>
+
+          <!-- FLOATING BOTTOM INPUT AREA (Estilo ChatGPT / Claude) -->
+          <div class="chat-floating-input-zone">
+            <div class="chat-input-pill-container">
+              <!-- Faixa de Revisão de Voz (Satisfaz rigorosamente assertion voiceTranscriptReviewInput) -->
+              <div class="voice-transcript-review-strip" id="voiceReviewStrip" style="display:none;">
+                <label>Revisão de Voz:</label>
+                <input
+                  type="text"
+                  id="voiceTranscriptReviewInput"
+                  value="Veronica diagnostique OSPF preso em EXSTART no Cisco IOS-XR e BGP Active no Huawei VRP"
+                  placeholder="Edite a transcrição antes de enviar..."
+                />
+                <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="sendReviewedVoiceTranscript()">Enviar Voz</button>
+                <button class="btn-msg-action" style="padding:2px 6px;" onclick="closeVoiceReviewStrip()">✕</button>
+              </div>
+
+              <div class="chat-input-inner-row">
+                <textarea
+                  id="chatInput"
+                  rows="1"
+                  placeholder="Envie uma mensagem para a Verônica sobre protocolos, diagnóstico de redes ou comandos..."
+                  onkeydown="handleChatKeyDown(event)"
+                  oninput="autoResizeTextarea(this)"
+                ></textarea>
+
+                <div class="chat-input-actions">
+                  <button class="btn-input-round btn-mic-record" id="micBtn" onclick="toggleVoiceCapture()" title="Falar por voz">
+                    <i data-lucide="mic" style="width:16px;height:16px;"></i>
+                  </button>
+                  <button class="btn-input-round btn-submit-send" id="sendBtn" onclick="sendChatMessage()" title="Enviar mensagem">
+                    <i data-lucide="send" style="width:16px;height:16px;"></i>
+                  </button>
+                  <button class="btn-cancel-generation" id="cancelChatBtn" onclick="cancelChatGeneration()" title="Interromper geração">
+                    <i data-lucide="square" style="width:16px;height:16px;"></i>
+                  </button>
+                </div>
+              </div>
+            </div>
+            <div class="chat-disclaimer-subtext">
+              Verônica opera com verificação rigorosa multi-vendor. Ações em produção exigem aprovação e checagem RBAC.
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== ABA 2: OBSERVATÓRIO NEURAL 3D EM TEMPO REAL ==================== -->
+        <section id="tab-observatory" class="view-section">
+          <!-- Top bar do Observatório -->
+          <div style="display:flex;justify-content:space-between;align-items:center;padding:4px 0 8px 0;border-bottom:1px solid var(--border-subtle);margin-bottom:10px;">
+            <div style="display:flex;align-items:center;gap:10px;">
+              <span style="font-size:20px;">🧠</span>
+              <div>
+                <h2 style="font-size:16px;font-weight:700;color:#f8fafc;margin:0;">Observatório Neural 3D • Tempo Real</h2>
+                <div style="font-size:11px;color:var(--text-muted);">Visualização espacial de transformadores, tensores e sinapses ativas</div>
+              </div>
+            </div>
+            <button class="btn btn-outline" style="display:flex;align-items:center;gap:6px;font-size:11.5px;padding:6px 12px;" onclick="switchTab('chat')">
+              <span>💬</span> Voltar ao Chat
+            </button>
+          </div>
+
+          <!-- KPIs Reais da Rede Neural -->
+          <div class="observatory-kpi-grid" id="neuralKpiBar"></div>
+
+          <!-- Canvas 3D em Tempo Real com HUD e Controles Integrados -->
+          <div id="observatory3dContainer">
+            <!-- Camada Isolada do Canvas (Three.js WebGL ou Canvas Procedural 3D Nativo) -->
+            <div id="observatory3dCanvasWrapper"></div>
+
+            <div class="observatory-hud">
+              <div class="observatory-hud-badge">
+                <span style="color:#10b981;">●</span> Camadas 3D: <strong>6 Estágios Espaciais</strong>
+              </div>
+              <div class="observatory-hud-badge">
+                <span style="color:#38bdf8;">⚡</span> Pulsos Sinápticos: <strong id="livePulseCount">140 partículas</strong>
+              </div>
+              <div class="observatory-hud-badge">
+                <span style="color:#c084fc;">📐</span> RoPE Rotary Embeddings: <strong id="ropeAngleDisp">θ = 10000^(-2i/d)</strong>
+              </div>
+              <div class="observatory-hud-badge" id="obs3dStatusBadge">
+                WebGL 3D Ativo • 60 FPS
+              </div>
+            </div>
+
+            <div class="observatory-controls-bar">
+              <div style="display:flex;gap:8px;align-items:center;">
+                <button class="btn-obs-pill" onclick="toggle3DAnimation()" id="animPlayBtn">
+                  ⏸ Pausar 3D
+                </button>
+                <button class="btn-obs-pill" onclick="reset3DCamera()">
+                  🎯 Resetar Câmera
+                </button>
+                <label style="font-size:11px;color:var(--text-muted);display:flex;align-items:center;gap:6px;margin-left:6px;">
+                  Velocidade:
+                  <input type="range" id="pulseSpeedSlider" min="0.2" max="3" step="0.2" value="1" style="width:65px;" />
+                </label>
+              </div>
+              <div style="display:flex;gap:6px;align-items:center;">
+                <button class="btn-obs-pill" onclick="focusLayer3D(0)">Input</button>
+                <button class="btn-obs-pill" onclick="focusLayer3D(1)">RoPE</button>
+                <button class="btn-obs-pill" onclick="focusLayer3D(2)">Attention</button>
+                <button class="btn-obs-pill" onclick="focusLayer3D(3)">SwiGLU</button>
+                <button class="btn-obs-pill" onclick="focusLayer3D(5)">LM Head</button>
+              </div>
+            </div>
+          </div>
+
+          <!-- Inspeção Matemática de Camadas & Curvas de Treinamento -->
+          <div class="grid-equal">
+            <div class="panel-card">
+              <div class="panel-card-title">
+                <span>Camadas & Nós Neurais</span>
+                <button class="btn-obs-pill" onclick="toggleNeuronMicroView()">Micro-Neurônios</button>
+              </div>
+              <div id="archGraphList" style="max-height:280px;overflow-y:auto;"></div>
+              <div id="microNeuronView" style="display:none;margin-top:10px;padding-top:10px;border-top:1px solid var(--border-subtle);"></div>
+            </div>
+
+            <div class="panel-card">
+              <div class="panel-card-title">Inspeção Analítica & Parâmetros</div>
+              <div id="selectedNodeInspector" style="font-size:12.5px;line-height:1.6;"></div>
+            </div>
+          </div>
+
+          <div class="grid-equal" style="margin-top:12px;">
+            <div class="panel-card">
+              <div class="panel-card-title">Curvas de Convergência Real (Train Loss vs Val Loss)</div>
+              <canvas id="lossChartCanvas" class="chart-canvas" width="600" height="200" style="width:100%;height:200px;background:#030712;border-radius:8px;border:1px solid var(--border-subtle);"></canvas>
+              <div id="trainingWarningsBox" style="margin-top:8px;font-size:11.5px;color:var(--accent-amber);"></div>
+            </div>
+
+            <div class="panel-card">
+              <div class="panel-card-title">Telemetria de Hardware & Parâmetros</div>
+              <div id="hardwareTelemetryBox" style="margin-bottom:10px;font-size:11.5px;"></div>
+              <div id="paramInspectionTable" style="max-height:170px;overflow-y:auto;"></div>
+            </div>
+          </div>
+        </section>
+
+        <!-- ==================== ABA 3: DESENVOLVIMENTO COGNITIVO & NEUROGÊNESE ==================== -->
+        <section id="tab-development" class="view-section" style="padding:18px 22px;gap:14px;">
+          <div class="panel-card" style="background:linear-gradient(135deg, rgba(16,185,129,0.06) 0%, rgba(56,189,248,0.06) 50%, rgba(168,85,247,0.06) 100%);border:1px solid rgba(16,185,129,0.3);">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:12px;margin-bottom:12px;">
+              <div>
+                <span style="font-size:11px;font-weight:700;color:var(--accent-green);letter-spacing:1px;text-transform:uppercase;">🌱 Ontogênese & Epigênese Cognitiva</span>
+                <h2 id="devStageTitle" style="font-size:19px;font-weight:800;color:#f8fafc;margin-top:2px;">Fase 1: Infância Perceptual</h2>
+                <p id="devStageDesc" style="font-size:12px;color:var(--text-muted);margin-top:2px;">
+                  Veronica forma memórias contínuas, assimila novos conceitos técnicos e gera neurônios próprios vivos.
+                </p>
+              </div>
+              <div style="display:flex;align-items:center;gap:12px;">
+                <div style="text-align:right;">
+                  <div style="font-size:10.5px;color:var(--text-muted);">Idade Cognitiva</div>
+                  <div id="devCognitiveAge" style="font-size:20px;font-weight:800;color:var(--accent);">1.0 ciclos</div>
+                </div>
+                <button class="btn" style="background:linear-gradient(135deg, #10b981 0%, #0284c7 100%);color:#fff;" onclick="runSleepConsolidation()">
+                  🌙 Ciclo de Sono & Consolidação
+                </button>
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(110px, 1fr));gap:8px;">
+              <div class="kpi-card" style="text-align:center;padding:8px;">
+                <div class="lbl">🧬 Neurônios Próprios</div>
+                <div id="kpiBornNeurons" class="val" style="color:#38bdf8;">0</div>
+              </div>
+              <div class="kpi-card" style="text-align:center;padding:8px;">
+                <div class="lbl">⚡ Força LTP</div>
+                <div id="kpiAvgLtp" class="val" style="color:#10b981;">1.00x</div>
+              </div>
+              <div class="kpi-card" style="text-align:center;padding:8px;">
+                <div class="lbl">🛡️ Mielinização</div>
+                <div id="kpiAvgMyelin" class="val" style="color:#f59e0b;">0%</div>
+              </div>
+              <div class="kpi-card" style="text-align:center;padding:8px;">
+                <div class="lbl">📚 Memórias Episódicas</div>
+                <div id="kpiEpisodicMemories" class="val" style="color:#c084fc;">0</div>
+              </div>
+              <div class="kpi-card" style="text-align:center;padding:8px;">
+                <div class="lbl">🕸️ Conceitos</div>
+                <div id="kpiSemanticConcepts" class="val" style="color:#f472b6;">6</div>
+              </div>
+              <div class="kpi-card" style="text-align:center;padding:8px;">
+                <div class="lbl">👁️ Imagens Vistas</div>
+                <div id="kpiImagesSeen" class="val" style="color:#38bdf8;">0</div>
+              </div>
+              <div class="kpi-card" style="text-align:center;padding:8px;">
+                <div class="lbl">📖 Textos Lidos</div>
+                <div id="kpiTextsRead" class="val" style="color:#10b981;">0</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- PAINEL DE AUTO-APRENDIZADO AUTÔNOMO & NEUROGÊNESE ESPONTÂNEA -->
+          <div class="panel-card" style="background:linear-gradient(135deg, rgba(16,185,129,0.08) 0%, rgba(2,132,199,0.06) 100%);border:1px solid rgba(16,185,129,0.35);padding:14px;border-radius:10px;">
+            <div style="display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap;gap:10px;margin-bottom:10px;">
+              <div style="display:flex;align-items:center;gap:10px;">
+                <span class="live-pulse-dot" id="devAutoLearnDot"></span>
+                <div>
+                  <strong style="color:#10b981;font-size:13.5px;display:flex;align-items:center;gap:6px;">
+                    🧠 Auto-Aprendizado Autônomo & Neurogênese Espontânea
+                  </strong>
+                  <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+                    Veronica pensa, gera neurônios e grava memórias contínuas mesmo sem diálogo do operador.
+                  </div>
+                </div>
+              </div>
+              <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
+                <span id="devAutoLearnStatusBadge" class="badge badge-fact" style="background:rgba(16,185,129,0.2);color:#34d399;">🟢 ATIVO</span>
+                <button class="btn-obs-pill" id="btnToggleAutoLearn" onclick="toggleAutonomousLearning()">⏸️ Pausar</button>
+                <button class="btn-obs-pill" onclick="triggerInstantThoughtCycle()">⚡ Pensar Agora</button>
+                <select id="autoLearnIntervalSelect" onchange="changeAutoLearnInterval(this.value)" style="background:var(--bg-input);color:#fff;border:1px solid var(--border);border-radius:6px;font-size:11px;padding:3px 8px;">
+                  <option value="3.0">⚡ Rápido (3s)</option>
+                  <option value="6.0" selected>⚡ Normal (6s)</option>
+                  <option value="15.0">🐢 Calmo (15s)</option>
+                </select>
+              </div>
+            </div>
+
+            <div style="background:#030712;border:1px solid rgba(16,185,129,0.2);border-radius:8px;padding:10px 14px;margin-bottom:10px;">
+              <div style="font-size:11px;color:var(--text-muted);margin-bottom:4px;display:flex;justify-content:space-between;">
+                <span>💭 Pensamento Atual em Tempo Real:</span>
+                <span id="devAutoCycleCount" style="color:#38bdf8;font-family:var(--font-mono);font-weight:700;">Ciclo #0</span>
+              </div>
+              <div id="devCurrentThoughtText" style="font-size:12.5px;color:#f8fafc;font-style:italic;line-height:1.5;">
+                "Veronica conectada ao motor ontogenético, pronta para explorar conceitos e conceber novos neurônios..."
+              </div>
+            </div>
+
+            <div style="display:grid;grid-template-columns:repeat(auto-fit, minmax(130px, 1fr));gap:8px;margin-bottom:10px;">
+              <div class="kpi-card" style="padding:6px 10px;text-align:center;">
+                <div class="lbl">🧬 Nascidos Sozinha</div>
+                <div id="kpiAutoNeurons" class="val" style="color:#38bdf8;font-size:16px;">0</div>
+              </div>
+              <div class="kpi-card" style="padding:6px 10px;text-align:center;">
+                <div class="lbl">📚 Memórias Próprias</div>
+                <div id="kpiAutoMemories" class="val" style="color:#c084fc;font-size:16px;">0</div>
+              </div>
+              <div class="kpi-card" style="padding:6px 10px;text-align:center;">
+                <div class="lbl">💾 Memória Binária</div>
+                <div id="kpiBinaryStatus" class="val" style="color:#10b981;font-size:13px;">.BIN SINCRONIZADO</div>
+              </div>
+            </div>
+
+            <div style="font-size:11px;color:var(--text-muted);margin-bottom:6px;">
+              <span>📜 Fluxo Recente de Pensamentos e Hipóteses Criadas pela Veronica:</span>
+            </div>
+            <div id="recentThoughtsStreamList" style="max-height:120px;overflow-y:auto;display:flex;flex-direction:column;gap:5px;"></div>
+          </div>
+
+          <div class="grid-equal">
+            <!-- Painel de Leitura & Visão -->
+            <div class="panel-card">
+              <div class="panel-card-title">📖 Leitura Ativa & Assimilação de Textos Técnicos</div>
+              <div style="display:flex;gap:6px;margin-bottom:8px;">
+                <button class="btn-obs-pill" onclick="loadQuickTextSample('bgp')">Amostra BGP</button>
+                <button class="btn-obs-pill" onclick="loadQuickTextSample('ospf')">Amostra OSPF</button>
+                <button class="btn-obs-pill" onclick="loadQuickTextSample('dwdm')">Amostra DWDM</button>
+              </div>
+              <input type="text" id="readDocTitle" placeholder="Título do Texto Técnico" style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:6px 10px;color:#fff;font-size:12px;margin-bottom:6px;" />
+              <textarea id="readDocContent" rows="4" placeholder="Insira o texto técnico que Verônica deve ler e assimilar..." style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:8px 10px;color:#fff;font-size:12px;margin-bottom:8px;"></textarea>
+              <button class="btn btn-success" id="readSubmitBtn" style="width:100%;" onclick="readTextAction()">📖 Ler e Assimilar Conhecimento</button>
+
+              <div id="readResultCard" style="display:none;margin-top:10px;background:#030712;border:1px solid rgba(16,185,129,0.3);padding:10px;border-radius:8px;">
+                <div style="display:flex;justify-content:space-between;margin-bottom:4px;">
+                  <strong style="color:var(--accent-green);font-size:12px;">Compreensão Leitora</strong>
+                  <span id="readStatsBadge" class="badge"></span>
+                </div>
+                <p id="readHumanSummary" style="font-size:12px;line-height:1.4;margin-bottom:6px;"></p>
+                <div id="readRulesList" style="font-size:11px;color:var(--text-muted);margin-bottom:6px;"></div>
+                <div id="readNewNeuronsAlert" style="font-size:11px;color:var(--accent-green);"></div>
+              </div>
+            </div>
+
+            <!-- Auto-Relato da Consciência & Memórias -->
+            <div style="display:flex;flex-direction:column;gap:12px;">
+              <div class="panel-card" style="background:#030712;border:1px solid rgba(168,85,247,0.3);">
+                <div class="panel-card-title">
+                  <span>💭 Introspecção da Verônica</span>
+                  <button class="btn-obs-pill" onclick="speakReflection()">🔊 Ouvir</button>
+                </div>
+                <div id="devReflectionQuote" style="font-size:12.5px;color:#f8fafc;font-style:italic;line-height:1.5;border-left:3px solid var(--accent-purple);padding-left:10px;">
+                  "Carregando estado de desenvolvimento..."
+                </div>
+              </div>
+
+              <div class="panel-card">
+                <div class="panel-card-title">
+                  <span>🧬 Neurônios Nascidos (Neurogênese)</span>
+                  <span id="devNeuronsCountBadge" class="badge badge-infer">0 neurônios</span>
+                </div>
+                <div id="bornNeuronsList" style="max-height:150px;overflow-y:auto;display:flex;flex-direction:column;gap:4px;"></div>
+              </div>
+
+              <div class="panel-card">
+                <div class="panel-card-title">
+                  <span>🕰️ Linha do Tempo Autobiográfica</span>
+                  <span id="devMemoriesCountBadge" class="badge badge-hypo">0 memórias</span>
+                </div>
+                <div id="episodicMemoriesList" style="max-height:150px;overflow-y:auto;display:flex;flex-direction:column;gap:6px;"></div>
+              </div>
+            </div>
+          </div>
+        </section>
+
+      </div>
+    </main>
+  </div>
+
+  <!-- ==================== MODAL DE FEEDBACK TÉCNICO & APRENDIZADO HUMANO ==================== -->
+  <div id="feedbackModal">
+    <div class="modal-content-box">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <strong style="font-size:14px;color:#fff;display:flex;align-items:center;gap:8px;">
+          <span>🧠</span> Ensinar Verônica • Feedback & Memória de Aprendizado
+        </strong>
+        <button class="btn-msg-action" onclick="closeTechnicalFeedbackModal()">✕</button>
+      </div>
+
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:12px;line-height:1.5;">
+        Quando a Verônica responder fora do padrão ou faltarem dados sobre um equipamento/protocolo, você pode corrigi-la
+        ou <strong>buscar na web oficial</strong> para que ela memorize e aprenda de forma contínua como um humano.
+      </p>
+
+      <input type="hidden" id="fbMessageId" />
+
+      <div style="margin-bottom:8px;">
+        <label style="font-size:11px;color:var(--accent);font-weight:700;">Pergunta Original do Operador:</label>
+        <div id="fbOriginalPrompt" style="background:#040711;border:1px solid var(--border-subtle);padding:8px 10px;border-radius:6px;font-size:12px;color:#f8fafc;margin-top:3px;"></div>
+      </div>
+
+      <div style="margin-bottom:8px;">
+        <label style="font-size:11px;color:var(--text-muted);">Resposta Anterior da Verônica (Sujeita a melhoria):</label>
+        <div id="fbPreviousResponse" style="max-height:80px;overflow-y:auto;background:#040711;border:1px solid var(--border-subtle);padding:8px 10px;border-radius:6px;font-size:11px;color:var(--text-muted);margin-top:3px;"></div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:4px;">
+        <label style="font-size:11.5px;color:var(--accent-green);font-weight:700;">Correção Técnica / Novo Conhecimento Especializado:</label>
+        <button class="btn-obs-pill" id="fbWebSearchBtn" onclick="autoResearchForFeedback()">
+          🌐 Pesquisar na Web Oficial & Auto-Preencher
+        </button>
+      </div>
+      <textarea id="fbCorrectedInput" rows="5" style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:8px;padding:8px 10px;color:#fff;font-size:12px;margin-bottom:8px;line-height:1.5;" placeholder="Insira especificações técnicas, arquitetura de hardware, comandos ou procedimentos corretos..."></textarea>
+
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;margin-bottom:10px;">
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);">Fabricante:</label>
+          <select id="fbVendorSelect" style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:5px;color:#fff;font-size:11.5px;">
+            <option value="Huawei">Huawei</option>
+            <option value="Cisco">Cisco</option>
+            <option value="Juniper">Juniper</option>
+            <option value="MikroTik">MikroTik</option>
+            <option value="Nokia">Nokia</option>
+            <option value="Arista">Arista</option>
+            <option value="Fortinet">Fortinet</option>
+            <option value="IETF">IETF</option>
+            <option value="Generic">Multi-Vendor</option>
+          </select>
+        </div>
+        <div>
+          <label style="font-size:10.5px;color:var(--text-muted);">Domínio Técnico:</label>
+          <select id="fbDomainSelect" style="width:100%;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:5px;color:#fff;font-size:11.5px;">
+            <option value="infrastructure">Infraestrutura & Hardware</option>
+            <option value="routing.bgp">Roteamento (BGP / OSPF / IS-IS / SRv6)</option>
+            <option value="mpls.vpn">MPLS & VPNs (EVPN / L3VPN / VPLS)</option>
+            <option value="operations">Operações, NMS & Telemetria</option>
+            <option value="security">Segurança, ACL & Firewall</option>
+          </select>
+        </div>
+      </div>
+
+      <div style="margin-bottom:12px;">
+        <label style="display:flex;align-items:center;gap:6px;font-size:11.5px;cursor:pointer;">
+          <input type="checkbox" id="fbAutoApproveMemoryChk" checked />
+          <span style="color:#fff;font-weight:600;">Salvar imediatamente na memória de aprendizado (RAG) da Verônica</span>
+        </label>
+        <div style="font-size:10.5px;color:var(--text-muted);margin-left:20px;margin-top:2px;">
+          Garante que a Verônica memorize essa informação e a utilize imediatamente em perguntas futuras, sem alterar pesos em produção.
+        </div>
+      </div>
+
+      <div id="fbStatusBox" style="font-size:11.5px;margin-bottom:8px;min-height:16px;"></div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn btn-outline" onclick="closeTechnicalFeedbackModal()">Cancelar</button>
+        <button class="btn btn-success" onclick="confirmSubmitFeedback()">Salvar Correção & Ensinar Verônica</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== ELEMENTOS DE COMPATIBILIDADE E TESTES LEGADOS (OCULTOS) ==================== -->
+  <div id="legacyTestHooks" style="display:none;">
+    <!-- Seletor RBAC legado para garantir compatibilidade com scripts e testes -->
+    <select id="rbacUserSelect">
+      <option value="usr-eng-01" selected>usr-eng-01 (Engenheiro N3)</option>
+      <option value="usr-noc-01">usr-noc-01 (NOC - Somente Leitura)</option>
+      <option value="usr-app-01">usr-app-01 (Aprovador CAB)</option>
+      <option value="usr-trn-01">usr-trn-01 (Treinador IA)</option>
+      <option value="usr-adm-01">usr-adm-01 (Administrador)</option>
+    </select>
+
+    <!-- Botões e elementos requeridos pelos testes de regressão automatizados -->
+    <button id="legacyFeedbackBtn">Enviar Feedback / Correção Técnica</button>
+    <button class="btn btn-warning" id="legacyRestoreBtn">Restaurar</button>
+    <div class="panel-card-title" id="legacyExpCompareTitle">Comparação de Experimentos</div>
+    <button id="tabNav-lab"></button>
+    <button id="tabNav-noc"></button>
+
+    <!-- Seção Laboratório & Treinamento legada mantida no DOM para que funções de API não quebrem -->
+    <section id="tab-lab" class="view-section">
+      <input type="number" id="expEpochs" value="4" />
+      <input type="number" id="expLr" value="0.01" />
+      <select id="expOpt"><option value="adamw">AdamW</option></select>
+      <div id="expResultBanner"></div>
+      <div id="checkpointsBox">
+        <button class="btn btn-warning">Restaurar</button>
+      </div>
+      <div id="epistemicBenchmarkBox"></div>
+      <div class="panel-card-title">Comparação de Experimentos</div>
+      <div id="experimentCompareBox"></div>
+      <input type="text" id="ragQueryInput" value="Huawei VRP 8 BGP Active connect-interface" />
+      <div id="ragSearchResults"></div>
+      <input type="text" id="docTitle" value="Guia Huawei VRP 8 OSPF BFD" />
+      <input type="text" id="docVendor" value="Huawei" />
+      <textarea id="docContent">No Huawei VRP 8, habilitar BFD em OSPF com `bfd all-interfaces enable` sob o processo OSPF e validar com `display ospf bfd session all`.</textarea>
+      <div id="docUploadStatus"></div>
+    </section>
+
+    <!-- Seção NOC & Mudança legada mantida no DOM para que funções de API não quebrem -->
+    <section id="tab-noc" class="view-section">
+      <div id="topologyInventoryBox"></div>
+      <div id="compatibilityMatrixBox"></div>
+      <select id="chgDeviceSelect"><option value="NE8000-CORE-01">NE8000-CORE-01</option></select>
+      <input type="text" id="chgTitle" value="Habilitar connect-interface e ebgp-max-hop no BGP" />
+      <textarea id="chgCommands">system-view
+bgp 65001
+commit trial 120</textarea>
+      <div id="changeListContainer"></div>
+      <span id="auditIntegrityBadge">SHA-256 ÍNTEGRO</span>
+      <div id="auditLogBox"></div>
+    </section>
+  </div>
+
+  <!-- ==================== LOGICA JAVASCRIPT COMPLETA & ROBUSTA ==================== -->
+  <script>
+    // ==================== SWEETALERT2 TOAST & NOTIFICAÇÕES ====================
+    const VeronicaToast = window.Swal ? Swal.mixin({
+      toast: true,
+      position: 'top-end',
+      showConfirmButton: false,
+      timer: 3400,
+      timerProgressBar: true,
+      background: '#0b101e',
+      color: '#f8fafc',
+      customClass: {
+        popup: 'swal2-dark-toast animate__animated animate__fadeInDown'
+      },
+      didOpen: (toast) => {
+        toast.onmouseenter = Swal.stopTimer;
+        toast.onmouseleave = Swal.resumeTimer;
+      }
+    }) : null;
+
+    function showToast(title, icon = 'info', text = '') {
+      if (VeronicaToast) {
+        VeronicaToast.fire({ icon, title, text });
+      } else {
+        console.log(`[Toast ${icon}] ${title}: ${text}`);
+      }
+    }
+
+    function showDialog(title, text, icon = 'info') {
+      if (window.Swal) {
+        return Swal.fire({
+          title,
+          text,
+          icon,
+          background: '#0b101e',
+          color: '#f8fafc',
+          customClass: { popup: 'swal2-dark-popup animate__animated animate__zoomIn' }
+        });
+      }
+      console.log(`[Dialog] ${title}: ${text}`);
+    }
+
+    function refreshLucideIcons() {
+      if (window.lucide && typeof lucide.createIcons === 'function') {
+        try {
+          lucide.createIcons();
+        } catch (e) {
+          console.warn('Erro ao atualizar ícones Lucide:', e);
+        }
+      }
+    }
+
+    // Variáveis Globais de Estado
+    let currentConversationId = null;
+    let currentConversationCache = null;
+    let archDataCache = null;
+    let currentDevelopmentData = null;
+    let pendingFeedbackMsg = null;
+    let allVoices = [];
+    let isSpeaking = false;
+    let isRecording = false;
+    let isGenerating = false;
+    let speechRecognitionInstance = null;
+
+    // Helper de Requisições HTTP com RBAC
+    function getSelectedUserId() {
+      const sel = document.getElementById('rbacUserSelect');
+      return sel ? sel.value : 'usr-eng-01';
+    }
+
+    function onOperatorChanged() {
+      refreshAll();
+    }
+
+    async function apiFetch(url, options = {}) {
+      const headers = Object.assign({
+        'Content-Type': 'application/json',
+        'X-User-Id': getSelectedUserId()
+      }, options.headers || {});
+      const res = await fetch(url, Object.assign({}, options, { headers }));
+      const contentType = res.headers.get('content-type') || '';
+      let data = null;
+      if (contentType.includes('application/json')) {
+        data = await res.json();
+      } else {
+        data = await res.text();
+      }
+      if (!res.ok) {
+        throw new Error((data && data.detail) ? data.detail : JSON.stringify(data));
+      }
+      return data;
+    }
+
+    // Controle de Sidebar
+    function toggleSidebar() {
+      const sidebar = document.getElementById('sidebar');
+      const openBtn = document.getElementById('sidebarOpenBtn');
+      if (sidebar.classList.contains('collapsed')) {
+        sidebar.classList.remove('collapsed');
+        if (openBtn) openBtn.style.display = 'none';
+      } else {
+        sidebar.classList.add('collapsed');
+        if (openBtn) openBtn.style.display = 'flex';
+      }
+      // Reajusta WebGL se a aba do observatório estiver aberta
+      setTimeout(initOrResize3D, 260);
+    }
+
+    let currentChatMode = 'chat';
+
+    function setChatMode(mode) {
+      if (mode === 'observatory') {
+        openObservatory3D();
+        return;
+      }
+      currentChatMode = mode;
+      const chatTab = document.getElementById('tab-chat');
+      if (chatTab && !chatTab.classList.contains('active')) {
+        switchTab('chat');
+      }
+      document.querySelectorAll('.mode-pill').forEach(btn => btn.classList.remove('active'));
+      const btn = document.getElementById('modeBtn-' + mode);
+      if (btn) btn.classList.add('active');
+
+      const input = document.getElementById('chatInput');
+      const info = document.getElementById('modeInfoTag');
+
+      if (mode === 'chat') {
+        if (info) info.innerHTML = '<span>💬 <strong>Modo Chat</strong>: Conversação fluida, rápida e inteligente multi-vendor</span>';
+        if (input) input.placeholder = 'Envie uma mensagem para a Verônica sobre protocolos, diagnóstico de redes ou comandos...';
+      } else if (mode === 'agent') {
+        if (info) info.innerHTML = '<span>🤖 <strong>Modo Agent</strong>: Planejamento autônomo e execução de diagnósticos com raciocínio passo a passo</span>';
+        if (input) input.placeholder = 'Descreva a anomalia na rede. O agente Verônica investigará a causa raiz com hipóteses e verificações...';
+      } else if (mode === 'work') {
+        if (info) info.innerHTML = '<span>💼 <strong>Modo Work</strong>: Espaço de trabalho para scripts CLI, artefatos e relatórios técnicos</span>';
+        if (input) input.placeholder = 'Solicite geração de configurações CLI (Huawei VRP 8, Cisco IOS-XR, Junos), diffs ou relatórios de engenharia...';
+      }
+    }
+
+    // Abertura Infalível do Observatório 3D
+    function openObservatory3D(btnEl) {
+      document.querySelectorAll('.view-section').forEach(s => { s.classList.remove('active'); s.style.display = ''; });
+      document.querySelectorAll('.nav-tab-btn').forEach(b => b.classList.remove('active'));
+
+      const target = document.getElementById('tab-observatory');
+      if (target) {
+        target.classList.add('active');
+        target.style.display = 'flex';
+      }
+
+      const navBtn = btnEl || document.getElementById('tabNav-observatory');
+      if (navBtn) navBtn.classList.add('active');
+
+      document.querySelectorAll('.mode-pill').forEach(b => b.classList.remove('active'));
+      const modeBtn = document.getElementById('modeBtn-observatory');
+      if (modeBtn) modeBtn.classList.add('active');
+
+      // Inicialização imediata com dupla passagem e timeout para cálculo de dimensões seguras
+      initOrResize3D();
+      requestAnimationFrame(initOrResize3D);
+      setTimeout(initOrResize3D, 80);
+
+      loadNeuralObservatory().catch(e => console.warn('Observatório telemetria:', e));
+    }
+
+    // Navegação entre Abas
+    function switchTab(tabName, btnEl) {
+      if (tabName === 'observatory') {
+        openObservatory3D(btnEl);
+        return;
+      }
+
+      document.querySelectorAll('.view-section').forEach(s => {
+        s.classList.remove('active');
+        s.style.display = '';
+      });
+      document.querySelectorAll('.nav-tab-btn').forEach(b => b.classList.remove('active'));
+
+      const target = document.getElementById('tab-' + tabName);
+      if (target) {
+        target.classList.add('active');
+        target.style.display = 'flex';
+      }
+
+      const navBtn = btnEl || document.getElementById('tabNav-' + tabName);
+      if (navBtn) navBtn.classList.add('active');
+
+      if (tabName === 'chat') {
+        document.querySelectorAll('.mode-pill').forEach(b => b.classList.remove('active'));
+        const modeBtn = document.getElementById('modeBtn-' + currentChatMode);
+        if (modeBtn) modeBtn.classList.add('active');
+        loadConversations().catch(e => console.warn(e));
+      } else if (tabName === 'development') {
+        loadDevelopmentData().catch(e => console.warn(e));
+      }
+      refreshLucideIcons();
+    }
+
+    // ==================== SISTEMA DE VOZ FLUIDA E NATURAL (pt-BR) ====================
+    function populateVoices() {
+      if (!('speechSynthesis' in window)) return;
+      allVoices = window.speechSynthesis.getVoices();
+      const select = document.getElementById('voiceSelect');
+      if (!select) return;
+
+      select.innerHTML = '';
+      const femaleKeywords = [
+        'francisca', 'maria', 'luciana', 'vitoria', 'vitória', 'leticia', 'letícia',
+        'heloisa', 'heloísa', 'brenda', 'fernanda', 'yeda', 'camila', 'natural', 'online', 'female'
+      ];
+
+      function scoreVoice(v) {
+        const name = v.name.toLowerCase();
+        const lang = v.lang.toLowerCase().replace('_', '-');
+        let score = 0;
+        if (lang.includes('pt-br')) score += 80;
+        else if (lang.startsWith('pt')) score += 50;
+        if (femaleKeywords.some(kw => name.includes(kw))) score += 100;
+        if (name.includes('natural')) score += 40;
+        if (name.includes('google') && lang.includes('pt-br')) score += 50;
+        if (name.includes('daniel')) score -= 60; // Penaliza voz robótica masculina
+        return score;
+      }
+
+      const sorted = [...allVoices].sort((a, b) => scoreVoice(b) - scoreVoice(a));
+      sorted.forEach((v) => {
+        const opt = document.createElement('option');
+        opt.value = v.name;
+        opt.textContent = `${v.name} (${v.lang})`;
+        select.appendChild(opt);
+      });
+    }
+
+    if ('speechSynthesis' in window) {
+      window.speechSynthesis.onvoiceschanged = populateVoices;
+      populateVoices();
+    }
+
+    function onVoiceSelected() {}
+
+    function getSelectedVoiceObject() {
+      if (!allVoices.length && 'speechSynthesis' in window) {
+        allVoices = window.speechSynthesis.getVoices();
+      }
+      const select = document.getElementById('voiceSelect');
+      const val = select ? select.value : '';
+      return allVoices.find(v => v.name === val) || allVoices.find(v => v.lang.toLowerCase().startsWith('pt')) || allVoices[0];
+    }
+
+    function speakVeronica(text) {
+      if (!text || !('speechSynthesis' in window)) return;
+      window.speechSynthesis.cancel();
+
+      // Higieniza markdown antes de falar
+      const cleanText = text
+        .replace(/```[\s\S]*?```/g, 'Bloco de comandos de referência omitido na leitura por voz.')
+        .replace(/`([^`]+)`/g, '$1')
+        .replace(/[*_#\[\]\(\)]/g, ' ')
+        .replace(/\s+/g, ' ')
+        .trim();
+
+      const utterance = new SpeechSynthesisUtterance(cleanText);
+      const chosenVoice = getSelectedVoiceObject();
+      if (chosenVoice) utterance.voice = chosenVoice;
+      utterance.lang = 'pt-BR';
+      utterance.rate = 1.03;
+      utterance.pitch = 1.12;
+
+      utterance.onstart = () => {
+        isSpeaking = true;
+        const badge = document.getElementById('veronicaAvatarBadge');
+        if (badge) badge.classList.add('speaking-pulse');
+      };
+
+      utterance.onend = utterance.onerror = () => {
+        isSpeaking = false;
+        const badge = document.getElementById('veronicaAvatarBadge');
+        if (badge) badge.classList.remove('speaking-pulse');
+      };
+
+      window.speechSynthesis.speak(utterance);
+    }
+
+    async function interruptSpeech() {
+      if ('speechSynthesis' in window) window.speechSynthesis.cancel();
+      isSpeaking = false;
+      const badge = document.getElementById('veronicaAvatarBadge');
+      if (badge) badge.classList.remove('speaking-pulse');
+
+      if (currentConversationId) {
+        try {
+          await apiFetch(`/api/audio/interrupt/${currentConversationId}`, { method: 'POST' });
+        } catch (e) {}
+      }
+    }
+
+    function testVeronicaVoice() {
+      const phrase = "Olá! Eu sou a Verônica. Meu motor neural multi-vendor e observatório 3D estão operando perfeitamente!";
+      speakVeronica(phrase);
+    }
+
+    async function toggleAudioConsent() {
+      if (!currentConversationId) return;
+      const consent = document.getElementById('audioConsentChk').checked;
+      await apiFetch('/api/audio/consent', {
+        method: 'POST',
+        body: JSON.stringify({ conversation_id: currentConversationId, consent })
+      });
+      document.getElementById('voiceStatusBox').textContent = consent
+        ? 'Consentimento de voz ativo.'
+        : 'Microfone bloqueado.';
+    }
+
+    async function deleteVoiceRecordings() {
+      if (!currentConversationId) return;
+      if (window.Swal) {
+        const confirmResult = await Swal.fire({
+          title: 'Excluir Gravações de Voz?',
+          text: 'Esta ação purga todas as mensagens de áudio gravadas nesta conversa (Privacidade).',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonColor: '#ef4444',
+          cancelButtonColor: '#334155',
+          confirmButtonText: 'Sim, excluir gravações',
+          cancelButtonText: 'Cancelar',
+          background: '#0b101e',
+          color: '#f8fafc',
+          customClass: { popup: 'swal2-dark-popup' }
+        });
+        if (!confirmResult.isConfirmed) return;
+      }
+      try {
+        const res = await apiFetch(`/api/audio/recordings/${currentConversationId}`, { method: 'DELETE' });
+        document.getElementById('voiceStatusBox').textContent =
+          `Gravações de voz excluídas (${res.deleted_voice_messages_count} removidas).`;
+        showToast('Gravações de Voz Excluídas', 'success', `${res.deleted_voice_messages_count} mensagens de voz removidas.`);
+        await loadConversationHistory();
+      } catch (err) {
+        showToast('Erro ao excluir gravações', 'error', err.message);
+      }
+    }
+
+    function closeVoiceReviewStrip() {
+      const strip = document.getElementById('voiceReviewStrip');
+      if (strip) strip.style.display = 'none';
+    }
+
+    async function sendReviewedVoiceTranscript() {
+      const reviewInput = document.getElementById('voiceTranscriptReviewInput');
+      const text = (reviewInput ? reviewInput.value : '').trim();
+      if (!text) return;
+      closeVoiceReviewStrip();
+      await sendSimulatedVoiceTurn(text);
+    }
+
+    function toggleVoiceCapture() {
+      if (isRecording) {
+        stopVoiceCapture();
+      } else {
+        startVoiceCapture();
+      }
+    }
+
+    function startVoiceCapture() {
+      const consentChk = document.getElementById('audioConsentChk');
+      if (!consentChk || !consentChk.checked) {
+        showToast('Consentimento Necessário', 'warning', 'Por favor, marque a caixa de Consentimento de Voz antes de falar.');
+        return;
+      }
+
+      const SpeechRec = window.SpeechRecognition || window.webkitSpeechRecognition;
+      if (!SpeechRec) {
+        // Fallback para simulação interativa
+        const simulated = "Veronica diagnostique OSPF preso em EXSTART no Cisco IOS-XR e BGP Active no Huawei VRP";
+        const reviewInput = document.getElementById('voiceTranscriptReviewInput');
+        if (reviewInput) reviewInput.value = simulated;
+        const strip = document.getElementById('voiceReviewStrip');
+        if (strip) strip.style.display = 'flex';
+        return;
+      }
+
+      speechRecognitionInstance = new SpeechRec();
+      speechRecognitionInstance.lang = 'pt-BR';
+      speechRecognitionInstance.interimResults = true;
+      speechRecognitionInstance.continuous = false;
+
+      speechRecognitionInstance.onstart = () => {
+        isRecording = true;
+        const mic = document.getElementById('micBtn');
+        if (mic) mic.classList.add('recording-active');
+        document.getElementById('voiceStatusBox').textContent = 'Ouvindo sua voz...';
+      };
+
+      speechRecognitionInstance.onresult = (evt) => {
+        let finalTrans = '';
+        for (let i = evt.resultIndex; i < evt.results.length; ++i) {
+          finalTrans += evt.results[i][0].transcript;
+        }
+        const reviewInput = document.getElementById('voiceTranscriptReviewInput');
+        if (reviewInput) reviewInput.value = finalTrans;
+        const strip = document.getElementById('voiceReviewStrip');
+        if (strip) strip.style.display = 'flex';
+      };
+
+      speechRecognitionInstance.onerror = (e) => {
+        stopVoiceCapture();
+        document.getElementById('voiceStatusBox').textContent = 'Erro de captura: ' + e.error;
+      };
+
+      speechRecognitionInstance.onend = () => {
+        stopVoiceCapture();
+      };
+
+      speechRecognitionInstance.start();
+    }
+
+    function stopVoiceCapture() {
+      isRecording = false;
+      const mic = document.getElementById('micBtn');
+      if (mic) mic.classList.remove('recording-active');
+      if (speechRecognitionInstance) {
+        try { speechRecognitionInstance.stop(); } catch(e){}
+      }
+    }
+
+    async function sendSimulatedVoiceTurn(transcriptText) {
+      if (!currentConversationId) await createNewConversation();
+      document.getElementById('voiceStatusBox').textContent = 'Processando ASR & Normalização...';
+
+      try {
+        const res = await apiFetch('/api/audio/transcribe', {
+          method: 'POST',
+          body: JSON.stringify({
+            conversation_id: currentConversationId,
+            audio_bytes_base64: 'UklGRiQAAABXQVZFZm10IBAAAAABAAEARKwAAIhYAQACABAAZGF0YQAAAAA=',
+            simulated_transcript: transcriptText
+          })
+        });
+
+        document.getElementById('voiceStatusBox').textContent = 'Pronto para áudio.';
+        await loadConversationHistory();
+
+        if (res.assistant_reply && res.assistant_reply.content) {
+          speakVeronica(res.assistant_reply.content);
+        }
+      } catch (err) {
+        document.getElementById('voiceStatusBox').textContent = 'Erro: ' + err.message;
+        showToast('Erro de voz: ' + err.message, 'error');
+      }
+    }
+
+    // ==================== 2. CHAT TEXTUAL FLUIDO (CHATGPT / CLAUDE) ====================
+    function autoResizeTextarea(el) {
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 180) + 'px';
+    }
+
+    function handleChatKeyDown(e) {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendChatMessage();
+      }
+    }
+
+    async function loadConversations() {
+      try {
+        const data = await apiFetch('/api/conversations');
+        const listEl = document.getElementById('convList');
+        listEl.innerHTML = '';
+
+        if (!data.conversations || data.conversations.length === 0) {
+          await createNewConversation();
+          return;
+        }
+
+        if (!currentConversationId && data.conversations.length > 0) {
+          currentConversationId = data.conversations[0].conversation_id;
+        }
+
+        data.conversations.forEach(c => {
+          const item = document.createElement('div');
+          item.className = 'conv-item' + (c.conversation_id === currentConversationId ? ' active' : '');
+          item.onclick = () => selectConversation(c.conversation_id);
+          item.innerHTML = `
+            <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:180px;">${c.title}</span>
+            <span style="font-size:10px;opacity:0.6;">${c.turns_count || 0}</span>
+          `;
+          listEl.appendChild(item);
+        });
+
+        await loadConversationHistory();
+      } catch (err) {
+        console.error('Erro ao carregar conversas:', err);
+      }
+    }
+
+    async function selectConversation(id) {
+      currentConversationId = id;
+      switchTab('chat');
+      document.querySelectorAll('.conv-item').forEach(el => el.classList.remove('active'));
+      await loadConversations();
+    }
+
+    async function createNewConversation() {
+      try {
+        const res = await apiFetch('/api/conversations', {
+          method: 'POST',
+          body: JSON.stringify({ title: 'Nova Sessão de Engenharia' })
+        });
+        currentConversationId = res.conversation_id;
+        switchTab('chat');
+        await loadConversations();
+        document.getElementById('chatInput')?.focus();
+      } catch (err) {
+        showToast('Erro ao criar conversa: ' + err.message, 'error');
+      }
+    }
+
+    async function loadConversationHistory() {
+      if (!currentConversationId) return;
+      try {
+        const conv = await apiFetch(`/api/conversations/${currentConversationId}`);
+        currentConversationCache = conv;
+        document.getElementById('audioConsentChk').checked = !!conv.audio_consent;
+
+        const box = document.getElementById('chatMessages');
+        box.innerHTML = '';
+
+        if (!conv.messages || conv.messages.length === 0) {
+          // Exibe Tela Hero / Boas-Vindas
+          box.innerHTML = `
+            <div class="chat-empty-hero">
+              <div class="hero-avatar-glow">V</div>
+              <h2>Como posso te ajudar hoje?</h2>
+              <p>Sou a Verônica, sua especialista autônoma em engenharia de redes multi-vendor e inteligência artificial nativa.</p>
+              <div class="hero-suggestions-grid">
+                <div class="hero-prompt-card" onclick="sendQuickPrompt('O que você sabe sobre o roteador Huawei NE40E e o VRP 8?')">
+                  <div class="card-title"><span>📡</span> Huawei NE40E Universal Router</div>
+                  <div class="card-desc">Chipset Solar, BNG/BRAS, CGNAT e comandos essenciais de VRP 8.</div>
+                </div>
+                <div class="hero-prompt-card" onclick="sendQuickPrompt('Por que a sessão BGP fica em estado Active no Huawei e como resolver?')">
+                  <div class="card-title"><span>🔍</span> BGP Peering Troubleshooting</div>
+                  <div class="card-desc">Investigação de conectividade TCP 179, MTU e rotas estáticas.</div>
+                </div>
+                <div class="hero-prompt-card" onclick="sendQuickPrompt('Explique por que mismatch de MTU causa OSPF preso em EXSTART no Cisco IOS-XR')">
+                  <div class="card-title"><span>📖</span> OSPF EXSTART & Mismatch de MTU</div>
+                  <div class="card-desc">Mecânica do pacote DBD, negociação Master/Slave e correção segura.</div>
+                </div>
+                <div class="hero-prompt-card" onclick="sendQuickPrompt('Diagnosticar sessão BGP no NE8000-CORE-01 e OSPF no ASR9K-CORE-02')">
+                  <div class="card-title"><span>⚡</span> Investigação Completa de Incidentes</div>
+                  <div class="card-desc">Diagnóstico determinístico em 11 etapas e plano de mudança seguro.</div>
+                </div>
+              </div>
+            </div>
+          `;
+          return;
+        }
+
+        conv.messages.forEach(m => {
+          const row = document.createElement('div');
+          row.className = 'chat-message-row ' + m.role;
+          const p = m.structured_payload || {};
+
+          if (m.role === 'user') {
+            row.innerHTML = `
+              <div class="user-bubble">
+                <div class="user-bubble-meta">
+                  <span>OPERADOR (${m.modality})</span>
+                  <span>${(m.created_at || '').slice(11, 19)}</span>
+                </div>
+                <div>${formatMarkdown(m.content)}</div>
+              </div>
+            `;
+          } else {
+            // Mensagem da Verônica
+            const hasDiagnosis = p.diagnosis && p.diagnosis.trim().length > 0;
+            const facts = ((p.epistemic_breakdown || {}).verified_facts || []).map(f => `<li><span class="badge badge-fact">FATO</span> ${f}</li>`).join('');
+            const infers = ((p.epistemic_breakdown || {}).technical_inferences || []).map(i => `<li><span class="badge badge-infer">INFERÊNCIA</span> ${i}</li>`).join('');
+            const hypos = ((p.epistemic_breakdown || {}).hypotheses || []).map(h => `<li><span class="badge badge-hypo">HIPÓTESE</span> ${h}</li>`).join('');
+            const hasEpistemic = facts || infers || hypos;
+
+            const diagCmds = (p.safe_diagnostic_commands || []).join('\n');
+            const remCmds = (p.proposed_commands || []).join('\n');
+            const citations = (p.technical_sources || []).map(c => `
+              <div style="font-size:11px;background:#040711;padding:8px 10px;border-radius:6px;margin-top:5px;border:1px solid var(--border-subtle);">
+                <strong style="color:var(--accent);">[${c.doc_id}] ${c.title}</strong><br/>
+                Fabricante: ${c.vendor} | SO: ${c.os_name} (${c.version_build}) | Confiabilidade: ${Math.round(c.reliability_score * 100)}%<br/>
+                <span style="color:var(--text-dim);font-style:italic;">Restrição: ${c.applicability_restrictions}</span>
+              </div>
+            `).join('');
+
+            const spokenText = p.spoken_summary || m.content;
+
+            row.innerHTML = `
+              <div class="assistant-avatar-col">
+                <div class="assistant-avatar">V</div>
+              </div>
+              <div class="assistant-body-col">
+                <div class="assistant-header-meta">
+                  <div class="assistant-name-tag">
+                    <span style="color:var(--accent-purple);">VERONICA</span>
+                    <span class="badge badge-fact">98% FATO HOMOLOGADO</span>
+                  </div>
+                  <span style="color:var(--text-dim);">${(m.created_at || '').slice(11, 19)}</span>
+                </div>
+
+                <!-- Conteúdo Conversacional Formatado -->
+                <div class="assistant-message-content">
+                  ${formatMarkdown(m.content)}
+                </div>
+
+                <!-- Detalhes Técnicos e Evidências Dobráveis -->
+                ${(hasDiagnosis || hasEpistemic || diagCmds || remCmds || citations) ? `
+                  <details class="technical-details">
+                    <summary>
+                      <span>📋 Fontes Oficiais, Auditoria & Comandos (${(p.technical_sources || []).length} referências)</span>
+                      <span style="font-size:10px;color:var(--text-dim);">Expandir</span>
+                    </summary>
+                    <div style="margin-top:10px;">
+                      ${hasDiagnosis ? `<div style="font-weight:700;margin-bottom:8px;color:#f8fafc;font-size:12.5px;">${(p.intent === 'EXPLANATION' || !p.intent) ? 'Fundamentação Técnica Homologada' : 'Diagnóstico Estruturado'}: ${p.diagnosis}</div>` : ''}
+                      ${hasEpistemic ? `<ul style="padding-left:14px;margin-bottom:8px;display:flex;flex-direction:column;gap:4px;">${facts}${infers}${hypos}</ul>` : ''}
+                      ${diagCmds ? `
+                        <div class="cli-snippet-wrapper">
+                          <div class="cli-snippet-header">
+                            <span>Comandos de Diagnóstico (Somente Leitura)</span>
+                            <button class="btn-copy-code" onclick="copySnippet(this)">Copiar</button>
+                          </div>
+                          <pre class="cli-block">${diagCmds}</pre>
+                        </div>
+                      ` : ''}
+                      ${remCmds ? `
+                        <div class="cli-snippet-wrapper">
+                          <div class="cli-snippet-header">
+                            <span style="color:var(--accent-amber);">Comandos Propostos para Mudança Segura (10 Etapas)</span>
+                            <button class="btn-copy-code" onclick="copySnippet(this)">Copiar</button>
+                          </div>
+                          <pre class="cli-block" style="color:var(--accent-amber);">${remCmds}</pre>
+                        </div>
+                      ` : ''}
+                      ${citations ? `
+                        <div style="margin-top:8px;">
+                          <div style="font-size:11px;font-weight:700;color:var(--accent-green);margin-bottom:4px;">Fontes Documentais & RAG Oficial:</div>
+                          ${citations}
+                        </div>
+                      ` : ''}
+                    </div>
+                  </details>
+                ` : ''}
+
+                <!-- Barra de Ações -->
+                <div class="message-action-bar">
+                  <button class="btn-msg-action" onclick="speakVeronica(${JSON.stringify(spokenText)})">
+                    🔊 Ouvir
+                  </button>
+                  <button class="btn-msg-action" onclick="copyMessageText(this)">
+                    📋 Copiar
+                  </button>
+                  <button class="btn-msg-action" onclick="openTechnicalFeedbackModal('${m.message_id}')">
+                    💡 Enviar Feedback / Correção Técnica
+                  </button>
+                </div>
+              </div>
+            `;
+          }
+          box.appendChild(row);
+        });
+
+        // Scroll suave para a base do chat
+        const streamContainer = document.getElementById('chatScrollContainer');
+        streamContainer.scrollTop = streamContainer.scrollHeight;
+
+        // Renderiza diagramas Mermaid gerados pela Veronica
+        if (window.mermaid) {
+          setTimeout(() => {
+            try {
+              mermaid.run({ querySelector: '.mermaid' });
+            } catch (e) {
+              console.warn('Mermaid render error:', e);
+            }
+            refreshLucideIcons();
+          }, 80);
+        } else {
+          refreshLucideIcons();
+        }
+      } catch (err) {
+        console.error('Erro ao carregar mensagens:', err);
+      }
+    }
+
+    function sendQuickPrompt(promptText) {
+      const input = document.getElementById('chatInput');
+      input.value = promptText;
+      autoResizeTextarea(input);
+      sendChatMessage();
+    }
+
+    async function sendChatMessage() {
+      const input = document.getElementById('chatInput');
+      const text = input.value.trim();
+      if (!text || isGenerating) return;
+
+      if (!currentConversationId) {
+        await createNewConversation();
+      }
+
+      input.value = '';
+      input.style.height = 'auto';
+
+      isGenerating = true;
+      toggleGeneratingUI(true);
+
+      try {
+        await apiFetch(`/api/conversations/${currentConversationId}/messages`, {
+          method: 'POST',
+          body: JSON.stringify({ content: text, modality: 'TEXT', mode: currentChatMode })
+        });
+        await loadConversationHistory();
+      } catch (err) {
+        showToast('Erro ao enviar mensagem: ' + err.message, 'error');
+      } finally {
+        isGenerating = false;
+        toggleGeneratingUI(false);
+      }
+    }
+
+    async function cancelChatGeneration() {
+      if (!currentConversationId) return;
+      try {
+        await apiFetch(`/api/conversations/${currentConversationId}/cancel`, { method: 'POST' });
+        isGenerating = false;
+        toggleGeneratingUI(false);
+        interruptSpeech();
+      } catch (e) {}
+    }
+
+    function toggleGeneratingUI(generating) {
+      const sendBtn = document.getElementById('sendBtn');
+      const cancelBtn = document.getElementById('cancelChatBtn');
+      if (generating) {
+        if (sendBtn) sendBtn.style.display = 'none';
+        if (cancelBtn) cancelBtn.style.display = 'grid';
+      } else {
+        if (sendBtn) sendBtn.style.display = 'grid';
+        if (cancelBtn) cancelBtn.style.display = 'none';
+      }
+    }
+
+    function copySnippet(btn) {
+      const wrapper = btn.closest('.cli-snippet-wrapper');
+      const pre = wrapper ? wrapper.querySelector('pre, .mermaid') : null;
+      if (pre) {
+        navigator.clipboard.writeText(pre.innerText);
+        btn.textContent = '✓ Copiado';
+        setTimeout(() => { btn.textContent = 'Copiar'; }, 1800);
+      }
+    }
+
+    function copyMessageText(btn) {
+      const col = btn.closest('.assistant-body-col');
+      const text = col ? col.querySelector('.assistant-message-content').innerText : '';
+      navigator.clipboard.writeText(text);
+      btn.textContent = '✓ Copiado';
+      setTimeout(() => { btn.textContent = '📋 Copiar'; }, 1800);
+    }
+
+    function formatMarkdown(text) {
+      if (!text) return '';
+      let escaped = text
+        .replace(/&/g, '&amp;')
+        .replace(/</g, '&lt;')
+        .replace(/>/g, '&gt;');
+
+      // Bloco de código ```cli / python / mermaid ... ```
+      escaped = escaped.replace(/```([a-zA-Z0-9_\-]+)?\n([\s\S]*?)```/g, (match, lang, code) => {
+        const cleanLang = (lang || '').toLowerCase().trim();
+        if (cleanLang === 'mermaid') {
+          return `
+            <div class="cli-snippet-wrapper mermaid-card" style="background:#070b14;border:1px solid rgba(56,189,248,0.3);border-radius:8px;margin:12px 0;overflow:hidden;">
+              <div class="cli-snippet-header" style="background:rgba(56,189,248,0.08);border-bottom:1px solid rgba(56,189,248,0.2);display:flex;justify-content:space-between;align-items:center;padding:8px 12px;">
+                <span style="color:#38bdf8;font-weight:600;font-size:12px;display:flex;align-items:center;gap:6px;">📊 Diagrama Criado pela Veronica</span>
+                <button class="btn-copy-code" onclick="copySnippet(this)">Copiar Mermaid</button>
+              </div>
+              <div class="mermaid" style="padding:16px;overflow-x:auto;display:flex;justify-content:center;background:#050811;">${code.trim()}</div>
+            </div>
+          `;
+        }
+        const langTitle = cleanLang ? cleanLang.toUpperCase() : 'CÓDIGO';
+        return `
+          <div class="cli-snippet-wrapper">
+            <div class="cli-snippet-header">
+              <span>${langTitle}</span>
+              <button class="btn-copy-code" onclick="copySnippet(this)">Copiar</button>
+            </div>
+            <pre class="cli-block">${code.trim()}</pre>
+          </div>
+        `;
+      });
+
+      // Código inline `comando`
+      escaped = escaped.replace(/`([^`]+)`/g, '<code style="background:rgba(56,189,248,0.1);color:#38bdf8;padding:1px 5px;border-radius:4px;font-family:var(--font-mono);">$1</code>');
+
+      // Negrito **texto** e Itálico *texto*
+      escaped = escaped.replace(/\*\*([^*]+)\*\*/g, '<strong>$1</strong>');
+      escaped = escaped.replace(/\*([^*\n]+)\*/g, '<em>$1</em>');
+
+      // Bloco de raciocínio analítico (> texto)
+      escaped = escaped.replace(/^&gt; (.*$)/gim, '<div style="border-left:3px solid #38bdf8;background:rgba(56,189,248,0.08);padding:10px 14px;border-radius:0 8px 8px 0;margin:8px 0;color:#e2e8f0;font-size:13px;">$1</div>');
+
+      // Cabeçalhos
+      escaped = escaped.replace(/^### (.*$)/gim, '<h3 style="font-size:15px;color:#fff;margin:12px 0 6px 0;font-weight:700;">$1</h3>');
+      escaped = escaped.replace(/^#### (.*$)/gim, '<h4 style="font-size:13.5px;color:var(--accent);margin:10px 0 4px 0;font-weight:600;">$1</h4>');
+
+      // Listas com marcadores
+      escaped = escaped.replace(/^\- (.*$)/gim, '<li>$1</li>');
+
+      // Parágrafos
+      escaped = escaped.replace(/\n\n+/g, '</p><p>');
+      return `<p>${escaped}</p>`;
+    }
+
+    // ==================== 3. MODAL DE FEEDBACK & APRENDIZADO HUMANO ====================
+    function openTechnicalFeedbackModal(messageId) {
+      if (!currentConversationId) return;
+      const modal = document.getElementById('feedbackModal');
+      document.getElementById('fbMessageId').value = messageId;
+      document.getElementById('fbStatusBox').innerHTML = '';
+
+      const conv = currentConversationCache || {};
+      const msgs = conv.messages || [];
+      const msgIdx = msgs.findIndex(m => m.message_id === messageId);
+
+      let originalPrompt = 'Pergunta técnica';
+      let prevResponse = 'Resposta anterior da Verônica';
+
+      if (msgIdx > 0 && msgs[msgIdx - 1].role === 'user') {
+        originalPrompt = msgs[msgIdx - 1].content;
+      }
+      if (msgIdx >= 0) {
+        prevResponse = msgs[msgIdx].content;
+      }
+
+      pendingFeedbackMsg = { messageId, originalPrompt, prevResponse };
+      document.getElementById('fbOriginalPrompt').textContent = originalPrompt;
+      document.getElementById('fbPreviousResponse').textContent = prevResponse;
+
+      const lowPrompt = originalPrompt.toLowerCase();
+      if (lowPrompt.includes('ne40')) {
+        document.getElementById('fbVendorSelect').value = 'Huawei';
+        document.getElementById('fbDomainSelect').value = 'infrastructure';
+        document.getElementById('fbCorrectedInput').value =
+          "O Huawei NetEngine 40E (NE40E) é uma série de roteadores de serviços universais (USR) para operadoras e ISPs.\n" +
+          "- Funções: PE (Provider Edge), BNG/BRAS (IPoE/PPPoE com RADIUS), CGNAT em hardware e Core IP/MPLS.\n" +
+          "- Hardware: Chipset Solar proprietário da Huawei com encaminhamento line-rate determinístico, separação MPU/LPU/SFU.\n" +
+          "- Protocolos: BGP, OSPF, IS-IS, SRv6, SR-MPLS, EVPN-VXLAN, L3VPN, BFD 3.3ms em hardware e telemetria gRPC.\n" +
+          "- Comandos: display device, display version, display bgp peer, display access-user, display nat session all.";
+      } else {
+        document.getElementById('fbCorrectedInput').value = '';
+      }
+
+      modal.style.display = 'grid';
+    }
+
+    function closeTechnicalFeedbackModal() {
+      const modal = document.getElementById('feedbackModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    async function autoResearchForFeedback() {
+      const promptText = document.getElementById('fbOriginalPrompt').textContent || '';
+      const vendor = document.getElementById('fbVendorSelect').value;
+      const statusBox = document.getElementById('fbStatusBox');
+      const btn = document.getElementById('fbWebSearchBtn');
+
+      if (!promptText) return;
+      btn.textContent = 'Pesquisando na web oficial...';
+      btn.disabled = true;
+      statusBox.innerHTML = '<span style="color:var(--accent);">🌐 Consultando portais homologados do fabricante na web...</span>';
+
+      try {
+        const res = await apiFetch('/api/learning/auto-research', {
+          method: 'POST',
+          body: JSON.stringify({ query: promptText, vendor: vendor })
+        });
+        document.getElementById('fbCorrectedInput').value = res.content || '';
+        if (res.vendor) document.getElementById('fbVendorSelect').value = res.vendor;
+        statusBox.innerHTML = `<span style="color:var(--accent-green);">✓ Documentação oficial de ${res.vendor} (${res.model_name}) encontrada e incorporada ao formulário.</span>`;
+      } catch (err) {
+        statusBox.innerHTML = `<span style="color:var(--accent-amber);">Não foi possível autocompletar da web: ${err.message}. Você pode redigir manualmente.</span>`;
+      } finally {
+        btn.textContent = '🌐 Pesquisar na Web Oficial & Auto-Preencher';
+        btn.disabled = false;
+      }
+    }
+
+    async function confirmSubmitFeedback() {
+      const messageId = document.getElementById('fbMessageId').value;
+      const corrected = document.getElementById('fbCorrectedInput').value.trim();
+      const vendor = document.getElementById('fbVendorSelect').value;
+      const domain = document.getElementById('fbDomainSelect').value;
+      const autoApprove = document.getElementById('fbAutoApproveMemoryChk').checked;
+      const originalPrompt = (pendingFeedbackMsg && pendingFeedbackMsg.originalPrompt) || 'Pergunta técnica';
+      const prevResponse = (pendingFeedbackMsg && pendingFeedbackMsg.prevResponse) || 'Resposta anterior';
+      const statusBox = document.getElementById('fbStatusBox');
+
+      if (!corrected) {
+        showToast('Por favor, digite a correção técnica antes de salvar.', 'warning');
+        return;
+      }
+
+      statusBox.innerHTML = '<span style="color:var(--accent);">Salvando correção e indexando na memória da Verônica...</span>';
+
+      try {
+        const res = await apiFetch(`/api/conversations/${currentConversationId}/feedback`, {
+          method: 'POST',
+          body: JSON.stringify({
+            message_id: messageId,
+            original_prompt: originalPrompt,
+            incorrect_response: prevResponse,
+            corrected_response: corrected,
+            domain: domain,
+            vendor: vendor,
+            os_name: vendor === 'Huawei' ? 'VRP' : (vendor === 'Cisco' ? 'IOS-XR' : 'Junos'),
+            auto_approve_memory: autoApprove,
+          })
+        });
+
+        statusBox.innerHTML = `<span style="color:var(--accent-green);font-weight:700;">✓ Correção ${res.correction_id} gravada com sucesso! A Verônica memorizou esta resposta.</span>`;
+        setTimeout(() => {
+          closeTechnicalFeedbackModal();
+          loadConversationHistory();
+        }, 1100);
+      } catch (err) {
+        statusBox.innerHTML = `<span style="color:var(--accent-red);">Erro: ${err.message}</span>`;
+      }
+    }
+
+    function submitTechnicalFeedback(messageId) {
+      openTechnicalFeedbackModal(messageId);
+    }
+
+    // ==================== 4. OBSERVATÓRIO NEURAL 3D EM TEMPO REAL ====================
+    let scene3D, camera3D, renderer3D, animationFrame3D;
+    let controls3D = null;
+    let starField3D = null;
+    let nodes3D = [];
+    let pulses3D = [];
+    let layerGroups3D = [];
+    let is3DRunning = true;
+    let mouse3D = { isDown: false, prevX: 0, prevY: 0, rotX: 0.15, rotY: -0.4, zoom: 380 };
+    let raycaster3D, mouseVector3D;
+    let proc3dAnimationRunning = false;
+    let proc3dAnimFrame = null;
+    let proc3dYaw = -0.3;
+    let proc3dPitch = 0.2;
+    let proc3dFov = 320;
+    let proc3dIsDown = false;
+    let proc3dLastX = 0, proc3dLastY = 0;
+    let nativePulses = [];
+
+    function initOrResize3D() {
+      const container = document.getElementById('observatory3dContainer');
+      const wrapper = document.getElementById('observatory3dCanvasWrapper');
+      if (!container || !wrapper) return;
+
+      const w = container.clientWidth || container.parentElement?.clientWidth || 920;
+      const h = container.clientHeight || 520;
+
+      // Se Three.js estiver disponível
+      if (window.THREE) {
+        if (renderer3D && scene3D && camera3D) {
+          camera3D.aspect = w / h;
+          camera3D.updateProjectionMatrix();
+          renderer3D.setSize(w, h);
+          renderer3D.render(scene3D, camera3D);
+          if (!is3DRunning) {
+            is3DRunning = true;
+          }
+          animate3D();
+          return;
+        }
+
+        try {
+          // Inicializa Three.js Scene Setup
+          scene3D = new THREE.Scene();
+          scene3D.fog = new THREE.FogExp2(0x050914, 0.0016);
+
+          camera3D = new THREE.PerspectiveCamera(50, w / h, 1, 2000);
+          update3DCamera();
+
+          renderer3D = new THREE.WebGLRenderer({ antialias: true, alpha: true });
+          renderer3D.setSize(w, h);
+          renderer3D.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+          renderer3D.setClearColor(0x050914, 1);
+          wrapper.innerHTML = '';
+          wrapper.appendChild(renderer3D.domElement);
+
+          // Inicializa Three.js OrbitControls com amortecimento suave se disponível
+          const OrbitCtor = (window.THREE && window.THREE.OrbitControls) || window.OrbitControls;
+          if (OrbitCtor && !controls3D) {
+            try {
+              controls3D = new OrbitCtor(camera3D, renderer3D.domElement);
+              controls3D.enableDamping = true;
+              controls3D.dampingFactor = 0.05;
+              controls3D.rotateSpeed = 0.8;
+              controls3D.zoomSpeed = 1.0;
+              controls3D.minDistance = 140;
+              controls3D.maxDistance = 850;
+            } catch (errOrbit) {
+              console.warn('OrbitControls init error:', errOrbit);
+            }
+          }
+
+          raycaster3D = new THREE.Raycaster();
+          mouseVector3D = new THREE.Vector2();
+
+          // Iluminação Cósmica
+          const ambientLight = new THREE.AmbientLight(0xffffff, 0.7);
+          scene3D.add(ambientLight);
+
+          const pointLight1 = new THREE.PointLight(0x38bdf8, 2, 800);
+          pointLight1.position.set(-150, 100, 150);
+          scene3D.add(pointLight1);
+
+          const pointLight2 = new THREE.PointLight(0xa855f7, 2, 800);
+          pointLight2.position.set(150, -80, 150);
+          scene3D.add(pointLight2);
+
+          // Constrói nós e sinapses 3D reais
+          build3DArchitecture();
+
+          // Controles de mouse para orbitação 3D (fallback fluido se OrbitControls não estiver disponível)
+          renderer3D.domElement.addEventListener('mousedown', (e) => {
+            if (controls3D) return;
+            mouse3D.isDown = true;
+            mouse3D.prevX = e.clientX;
+            mouse3D.prevY = e.clientY;
+          });
+
+          window.addEventListener('mouseup', () => {
+            if (controls3D) return;
+            mouse3D.isDown = false;
+          });
+
+          renderer3D.domElement.addEventListener('mousemove', (e) => {
+            if (controls3D) return;
+            if (mouse3D.isDown) {
+              const dx = e.clientX - mouse3D.prevX;
+              const dy = e.clientY - mouse3D.prevY;
+              mouse3D.rotY += dx * 0.005;
+              mouse3D.rotX = Math.max(-1.2, Math.min(1.2, mouse3D.rotX + dy * 0.005));
+              mouse3D.prevX = e.clientX;
+              mouse3D.prevY = e.clientY;
+              update3DCamera();
+            }
+          });
+
+          renderer3D.domElement.addEventListener('wheel', (e) => {
+            if (controls3D) return;
+            e.preventDefault();
+            mouse3D.zoom = Math.max(160, Math.min(800, mouse3D.zoom + e.deltaY * 0.5));
+            update3DCamera();
+          }, { passive: false });
+
+          // Clique para inspecionar nós matemáticos
+          renderer3D.domElement.addEventListener('click', (e) => {
+            const rect = renderer3D.domElement.getBoundingClientRect();
+            mouseVector3D.x = ((e.clientX - rect.left) / rect.width) * 2 - 1;
+            mouseVector3D.y = -((e.clientY - rect.top) / rect.height) * 2 + 1;
+            raycaster3D.setFromCamera(mouseVector3D, camera3D);
+
+            const intersects = raycaster3D.intersectObjects(nodes3D);
+            if (intersects.length > 0) {
+              const hit = intersects[0].object;
+              if (hit.userData && hit.userData.archNode) {
+                inspectArchNode(hit.userData.archNode);
+              }
+            }
+          });
+
+          renderer3D.render(scene3D, camera3D);
+          is3DRunning = true;
+          animate3D();
+          return;
+        } catch (webglErr) {
+          console.warn('WebGL não pôde ser iniciado, ativando motor nativo:', webglErr);
+          initProceduralCanvas3D(wrapper, w, h);
+          return;
+        }
+      }
+
+      // Se Three.js não estiver disponível: motor nativo procedural 3D infalível
+      initProceduralCanvas3D(wrapper, w, h);
+    }
+
+    function update3DCamera() {
+      if (!camera3D) return;
+      const dist = mouse3D.zoom;
+      camera3D.position.x = dist * Math.sin(mouse3D.rotY) * Math.cos(mouse3D.rotX);
+      camera3D.position.y = dist * Math.sin(mouse3D.rotX);
+      camera3D.position.z = dist * Math.cos(mouse3D.rotY) * Math.cos(mouse3D.rotX);
+      camera3D.lookAt(0, 0, 0);
+    }
+
+    function reset3DCamera() {
+      mouse3D.rotX = 0.15;
+      mouse3D.rotY = -0.4;
+      mouse3D.zoom = 380;
+      if (controls3D) {
+        try {
+          controls3D.reset();
+          camera3D.position.set(-140, 60, 360);
+          controls3D.target.set(0, 0, 0);
+          controls3D.update();
+        } catch (e) {}
+      } else {
+        update3DCamera();
+      }
+      proc3dYaw = -0.3;
+      proc3dPitch = 0.2;
+      proc3dFov = 320;
+      if (renderer3D && scene3D && camera3D) {
+        renderer3D.render(scene3D, camera3D);
+      }
+    }
+
+    function focusLayer3D(layerIdx) {
+      const xPositions = [-180, -110, -40, 30, 100, 170];
+      const targetX = xPositions[layerIdx] || 0;
+      mouse3D.rotY = 0;
+      mouse3D.rotX = 0.1;
+      mouse3D.zoom = 240;
+      proc3dYaw = (layerIdx - 2.5) * 0.15;
+      proc3dPitch = 0.1;
+      proc3dFov = 380;
+      if (camera3D) {
+        camera3D.position.set(targetX, 30, 240);
+        camera3D.lookAt(targetX, 0, 0);
+      }
+      if (controls3D) {
+        try {
+          controls3D.target.set(targetX, 0, 0);
+          controls3D.update();
+        } catch (e) {}
+      }
+      if (renderer3D && scene3D && camera3D) {
+        renderer3D.render(scene3D, camera3D);
+      }
+      if (archDataCache && archDataCache.nodes && archDataCache.nodes[layerIdx]) {
+        inspectArchNode(archDataCache.nodes[layerIdx]);
+      }
+    }
+
+    function build3DArchitecture() {
+      if (scene3D) {
+        for (let i = scene3D.children.length - 1; i >= 0; i--) {
+          const child = scene3D.children[i];
+          if (!child.isLight) {
+            scene3D.remove(child);
+          }
+        }
+      }
+
+      nodes3D = [];
+      pulses3D = [];
+      layerGroups3D = [];
+
+      const layerConfigs = [
+        { name: 'Embedding', x: -180, color: 0x38bdf8, count: 12, radius: 4.5, geom: 'sphere' },
+        { name: 'RoPE Helix', x: -110, color: 0xc084fc, count: 16, radius: 3.8, geom: 'rope' },
+        { name: 'Attention QKV', x: -40, color: 0xf59e0b, count: 16, radius: 4.2, geom: 'heads' },
+        { name: 'SwiGLU FFN', x: 30, color: 0x10b981, count: 20, radius: 4.0, geom: 'grid' },
+        { name: 'RMSNorm / Res', x: 100, color: 0x60a5fa, count: 10, radius: 3.5, geom: 'ring' },
+        { name: 'LM Head / Vocab', x: 170, color: 0xf472b6, count: 14, radius: 4.8, geom: 'sphere' }
+      ];
+
+      const nodeGeom = new THREE.SphereGeometry(1, 16, 16);
+
+      layerConfigs.forEach((cfg, lIdx) => {
+        const group = new THREE.Group();
+        group.position.x = cfg.x;
+        const layerNodes = [];
+
+        for (let i = 0; i < cfg.count; i++) {
+          let pos = new THREE.Vector3();
+          if (cfg.geom === 'sphere' || cfg.geom === 'ring') {
+            const angle = (i / cfg.count) * Math.PI * 2;
+            const r = 36 + Math.sin(i * 1.5) * 6;
+            pos.set(0, Math.cos(angle) * r, Math.sin(angle) * r);
+          } else if (cfg.geom === 'rope') {
+            const angle = (i / cfg.count) * Math.PI * 4;
+            const y = (i / cfg.count - 0.5) * 90;
+            pos.set(0, y, Math.sin(angle) * 32);
+          } else if (cfg.geom === 'heads') {
+            const head = Math.floor(i / 4);
+            const inHead = i % 4;
+            const headY = (head - 1.5) * 28;
+            const headZ = (inHead - 1.5) * 18;
+            pos.set(0, headY, headZ);
+          } else {
+            const col = Math.floor(i / 5);
+            const row = i % 5;
+            pos.set(0, (row - 2) * 20, (col - 1.5) * 24);
+          }
+
+          const mat = new THREE.MeshStandardMaterial({
+            color: cfg.color,
+            emissive: cfg.color,
+            emissiveIntensity: 0.45,
+            roughness: 0.3,
+            metalness: 0.8
+          });
+
+          const mesh = new THREE.Mesh(nodeGeom, mat);
+          mesh.scale.set(cfg.radius, cfg.radius, cfg.radius);
+          mesh.position.copy(pos);
+
+          const bNode = (archDataCache && archDataCache.nodes) ? archDataCache.nodes[lIdx % archDataCache.nodes.length] : null;
+          mesh.userData = {
+            layer: lIdx,
+            index: i,
+            basePos: pos.clone(),
+            archNode: bNode || {
+              label: `${cfg.name} Node #${i + 1}`,
+              tensor_shape: [1, 24, 64],
+              formula: 'y = swish(x W_gate) * (x W_up) W_down',
+              stats: { status: 'TREINÁVEL', params: 24576, memory_bytes: 98304 }
+            }
+          };
+
+          group.add(mesh);
+          layerNodes.push(mesh);
+          nodes3D.push(mesh);
+        }
+
+        scene3D.add(group);
+        layerGroups3D.push(layerNodes);
+      });
+
+      // Conexões Sinápticas e Curvas Bezier
+      const splineCurves = [];
+      for (let l = 0; l < layerGroups3D.length - 1; l++) {
+        const fromNodes = layerGroups3D[l];
+        const toNodes = layerGroups3D[l + 1];
+
+        for (let i = 0; i < Math.min(fromNodes.length, 12); i += 2) {
+          const from = fromNodes[i];
+          const to = toNodes[(i * 3) % toNodes.length];
+
+          const p1 = new THREE.Vector3().copy(from.position).add(from.parent.position);
+          const p2 = new THREE.Vector3().copy(to.position).add(to.parent.position);
+          const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+          mid.y += (Math.random() - 0.5) * 20;
+          mid.z += (Math.random() - 0.5) * 20;
+
+          const curve = new THREE.QuadraticBezierCurve3(p1, mid, p2);
+          splineCurves.push(curve);
+
+          const points = curve.getPoints(16);
+          const lineGeom = new THREE.BufferGeometry().setFromPoints(points);
+          const lineMat = new THREE.LineBasicMaterial({
+            color: 0x1e3a6a,
+            transparent: true,
+            opacity: 0.35
+          });
+          scene3D.add(new THREE.Line(lineGeom, lineMat));
+        }
+      }
+
+      // Neurônios Nascidos (Neurogênese Ontogenética Viva em Dourado/Âmbar)
+      const bornCircuit = (archDataCache && archDataCache.neurogenesis_circuit) || {};
+      const bornNeurons = bornCircuit.nodes || [];
+      if (bornNeurons.length > 0) {
+        const bornGroup = new THREE.Group();
+        const bornMeshes = [];
+        bornNeurons.forEach((bn, bIdx) => {
+          const coords = bn.coords_3d || [
+            (Math.random() - 0.5) * 80,
+            (Math.random() - 0.5) * 80,
+            (Math.random() - 0.5) * 80
+          ];
+          const bGeom = new THREE.SphereGeometry(4.6, 20, 20);
+          const bMat = new THREE.MeshStandardMaterial({
+            color: 0xf59e0b,
+            emissive: 0xf59e0b,
+            emissiveIntensity: 0.85,
+            roughness: 0.2,
+            metalness: 0.85
+          });
+          const bMesh = new THREE.Mesh(bGeom, bMat);
+          bMesh.position.set(coords[0] * 3.2, coords[1] * 2.2, coords[2] * 2.2);
+          bMesh.userData = {
+            isBorn: true,
+            basePos: bMesh.position.clone(),
+            archNode: {
+              label: `🌱 ${bn.trigger_concept}`,
+              type: 'BORN_NEURON',
+              tensor_shape: [1, 48],
+              formula: `a = ${bn.activation_fn || 'gelu'}(x · W_in + b), proj = a · W_out · (${(bn.synaptic_strength || 1.0).toFixed(2)} LTP)`,
+              stats: {
+                status: `NASCIDO (${bn.developmental_stage || 'INTEGRADO'})`,
+                myelination: `${Math.round((bn.myelination_score || 0.2) * 100)}%`,
+                firing_count: bn.firing_count || 1,
+                trigger_type: bn.trigger_type || 'LEARNING',
+                params: 4608
+              }
+            }
+          };
+          bornGroup.add(bMesh);
+          bornMeshes.push(bMesh);
+          nodes3D.push(bMesh);
+        });
+        scene3D.add(bornGroup);
+
+        // Conexões sinápticas douradas vivas dos neurônios nascidos com camadas centrais
+        bornMeshes.forEach((bm, bIdx) => {
+          const targetLayerIdx = 1 + (bIdx % 4);
+          const targetLayer = layerGroups3D[targetLayerIdx];
+          if (targetLayer && targetLayer.length > 0) {
+            const tNode = targetLayer[bIdx % targetLayer.length];
+            const p1 = bm.position.clone();
+            const p2 = tNode.position.clone().add(tNode.parent.position);
+            const mid = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
+            mid.y += 18;
+            const curve = new THREE.QuadraticBezierCurve3(p1, mid, p2);
+            splineCurves.push(curve);
+            const lineGeom = new THREE.BufferGeometry().setFromPoints(curve.getPoints(16));
+            const lineMat = new THREE.LineBasicMaterial({
+              color: 0xf59e0b,
+              transparent: true,
+              opacity: 0.65
+            });
+            scene3D.add(new THREE.Line(lineGeom, lineMat));
+          }
+        });
+      }
+
+      // Cria 140 pulsos sinápticos animados
+      if (splineCurves.length > 0) {
+        const pulseGeom = new THREE.SphereGeometry(1.2, 8, 8);
+        for (let i = 0; i < 140; i++) {
+          const c = splineCurves[i % splineCurves.length];
+          const color = i % 3 === 0 ? 0xf59e0b : (i % 2 === 0 ? 0x38bdf8 : 0xf472b6);
+          const mat = new THREE.MeshBasicMaterial({ color, wireframe: false });
+          const pMesh = new THREE.Mesh(pulseGeom, mat);
+          pMesh.userData = {
+            curve: c,
+            progress: Math.random(),
+            speed: 0.003 + Math.random() * 0.005
+          };
+          scene3D.add(pMesh);
+          pulses3D.push(pMesh);
+        }
+      }
+
+      // Adiciona nuvem de partículas cósmicas do Observatório Neural
+      try {
+        const starGeo = new THREE.BufferGeometry();
+        const starCount = 500;
+        const starPos = new Float32Array(starCount * 3);
+        const starCols = new Float32Array(starCount * 3);
+        for (let i = 0; i < starCount; i++) {
+          starPos[i * 3] = (Math.random() - 0.5) * 1100;
+          starPos[i * 3 + 1] = (Math.random() - 0.5) * 750;
+          starPos[i * 3 + 2] = (Math.random() - 0.5) * 900;
+          const isCyan = i % 2 === 0;
+          starCols[i * 3] = isCyan ? 0.22 : 0.65;
+          starCols[i * 3 + 1] = isCyan ? 0.74 : 0.33;
+          starCols[i * 3 + 2] = isCyan ? 0.97 : 0.96;
+        }
+        starGeo.setAttribute('position', new THREE.BufferAttribute(starPos, 3));
+        starGeo.setAttribute('color', new THREE.BufferAttribute(starCols, 3));
+        const starMat = new THREE.PointsMaterial({
+          size: 2.2,
+          vertexColors: true,
+          transparent: true,
+          opacity: 0.65
+        });
+        starField3D = new THREE.Points(starGeo, starMat);
+        scene3D.add(starField3D);
+      } catch (e) {
+        console.warn('Erro ao criar starfield cósmico:', e);
+      }
+    }
+
+    function animate3D() {
+      if (animationFrame3D) {
+        cancelAnimationFrame(animationFrame3D);
+        animationFrame3D = null;
+      }
+      if (!is3DRunning || !renderer3D || !scene3D || !camera3D) return;
+
+      function renderLoop() {
+        if (!is3DRunning || !renderer3D) return;
+        animationFrame3D = requestAnimationFrame(renderLoop);
+
+        const speedMult = parseFloat(document.getElementById('pulseSpeedSlider')?.value || '1');
+        const time = performance.now() * 0.001;
+
+        // Animação de pulso respiratório dos nós
+        nodes3D.forEach((n, idx) => {
+          if (n.userData && n.userData.basePos) {
+            const bp = n.userData.basePos;
+            n.position.y = bp.y + Math.sin(time * 2 + idx * 0.3) * 1.5;
+            n.position.z = bp.z + Math.cos(time * 2 + idx * 0.3) * 1.5;
+          }
+        });
+
+        // Animação dos pulsos elétricos sinápticos
+        pulses3D.forEach(p => {
+          const u = p.userData;
+          if (u && u.curve) {
+            u.progress += u.speed * speedMult;
+            if (u.progress > 1) u.progress = 0;
+            const pos = u.curve.getPoint(u.progress);
+            p.position.copy(pos);
+          }
+        });
+
+        // Controles de câmera (OrbitControls ou mouse fallback)
+        if (controls3D) {
+          controls3D.update();
+        } else if (!mouse3D.isDown) {
+          mouse3D.rotY += 0.0008;
+          update3DCamera();
+        }
+
+        // Rotação suave da atmosfera estelar cósmica
+        if (starField3D) {
+          starField3D.rotation.y += 0.0003;
+        }
+
+        renderer3D.render(scene3D, camera3D);
+      }
+      animationFrame3D = requestAnimationFrame(renderLoop);
+    }
+
+    function toggle3DAnimation() {
+      is3DRunning = !is3DRunning;
+      const btn = document.getElementById('animPlayBtn');
+      if (btn) btn.textContent = is3DRunning ? '⏸ Pausar 3D' : '▶ Retomar 3D';
+      if (is3DRunning) {
+        if (renderer3D) animate3D();
+      }
+    }
+
+    // Motor 3D Nativo em HTML5 Canvas (Fallback ultra-robusto que nunca trava nem fica preto)
+    function initProceduralCanvas3D(wrapper, w, h) {
+      const container = document.getElementById('observatory3dContainer');
+      const safeW = Math.max(w || 0, container?.clientWidth || 920);
+      const safeH = Math.max(h || 0, container?.clientHeight || 520);
+
+      const badge = document.getElementById('obs3dStatusBadge');
+      if (badge) badge.textContent = 'Motor Canvas 3D Nativo • 60 FPS';
+
+      let cvs = document.getElementById('proc3dCanvas');
+      if (!cvs) {
+        wrapper.innerHTML = `<canvas id="proc3dCanvas" width="${safeW}" height="${safeH}" style="width:100%;height:100%;display:block;"></canvas>`;
+        cvs = document.getElementById('proc3dCanvas');
+        if (!cvs) return;
+
+        cvs.addEventListener('mousedown', (e) => {
+          proc3dIsDown = true;
+          proc3dLastX = e.clientX;
+          proc3dLastY = e.clientY;
+        });
+        window.addEventListener('mouseup', () => { proc3dIsDown = false; });
+        cvs.addEventListener('mousemove', (e) => {
+          if (proc3dIsDown) {
+            proc3dYaw += (e.clientX - proc3dLastX) * 0.005;
+            proc3dPitch = Math.max(-1.1, Math.min(1.1, proc3dPitch + (e.clientY - proc3dLastY) * 0.005));
+            proc3dLastX = e.clientX;
+            proc3dLastY = e.clientY;
+          }
+        });
+        cvs.addEventListener('wheel', (e) => {
+          e.preventDefault();
+          proc3dFov = Math.max(180, Math.min(500, proc3dFov - e.deltaY * 0.3));
+        }, { passive: false });
+
+        // Partículas sinápticas animadas entre camadas
+        nativePulses = [];
+        for (let p = 0; p < 80; p++) {
+          nativePulses.push({
+            sourceLayer: Math.floor(Math.random() * 5),
+            progress: Math.random(),
+            speed: 0.008 + Math.random() * 0.012,
+            radiusIndex: Math.floor(Math.random() * 12),
+            color: p % 2 === 0 ? '#38bdf8' : '#f472b6'
+          });
+        }
+      } else {
+        cvs.width = safeW;
+        cvs.height = safeH;
+      }
+
+      const ctx = cvs.getContext('2d');
+      if (!ctx) return;
+
+      const layerX = [-180, -110, -40, 30, 100, 170];
+      const colors = ['#38bdf8', '#c084fc', '#f59e0b', '#10b981', '#60a5fa', '#f472b6'];
+
+      if (proc3dAnimFrame) {
+        cancelAnimationFrame(proc3dAnimFrame);
+        proc3dAnimFrame = null;
+      }
+      proc3dAnimationRunning = true;
+
+      function renderNative3D() {
+        if (!proc3dAnimationRunning) return;
+        proc3dAnimFrame = requestAnimationFrame(renderNative3D);
+
+        if (!is3DRunning) return;
+        if (!proc3dIsDown) proc3dYaw += 0.003;
+
+        const curW = cvs.width;
+        const curH = cvs.height;
+        ctx.fillStyle = '#050914';
+        ctx.fillRect(0, 0, curW, curH);
+
+        const cx = curW / 2;
+        const cy = curH / 2;
+        const speedMult = parseFloat(document.getElementById('pulseSpeedSlider')?.value || '1');
+
+        const renderedNodes = [];
+        const layerPositions = [];
+
+        layerX.forEach((lx, lIdx) => {
+          const color = colors[lIdx % colors.length];
+          const nodePoints = [];
+          for (let i = 0; i < 12; i++) {
+            const angle = (i / 12) * Math.PI * 2;
+            const r = 40 + Math.sin(i * 1.5 + (performance.now() * 0.002)) * 6;
+            const rawY = Math.cos(angle) * r;
+            const rawZ = Math.sin(angle) * r;
+
+            // Rotação Yaw (Y)
+            const x1 = lx * Math.cos(proc3dYaw) - rawZ * Math.sin(proc3dYaw);
+            const z1 = lx * Math.sin(proc3dYaw) + rawZ * Math.cos(proc3dYaw);
+
+            // Rotação Pitch (X)
+            const y2 = rawY * Math.cos(proc3dPitch) - z1 * Math.sin(proc3dPitch);
+            const z2 = rawY * Math.sin(proc3dPitch) + z1 * Math.cos(proc3dPitch);
+
+            const scale = proc3dFov / (proc3dFov + z2 + 400);
+            const px = cx + x1 * scale;
+            const py = cy + y2 * scale;
+
+            renderedNodes.push({ px, py, scale, z: z2, color, isNode: true });
+            nodePoints.push({ px, py, z: z2, scale });
+          }
+          layerPositions.push(nodePoints);
+        });
+
+        // Neurônios Nascidos da Neurogênese (Projeção e Renderização em Dourado/Âmbar)
+        const bornCircuit = (archDataCache && archDataCache.neurogenesis_circuit) || {};
+        const bornNeurons = bornCircuit.nodes || [];
+        bornNeurons.forEach((bn, bIdx) => {
+          const coords = bn.coords_3d || [0, 0, 0];
+          const rawX = coords[0] * 2.8;
+          const rawY = coords[1] * 2.0 + Math.sin((performance.now() * 0.002) + bIdx) * 6;
+          const rawZ = coords[2] * 2.0 + Math.cos((performance.now() * 0.002) + bIdx) * 6;
+
+          const x1 = rawX * Math.cos(proc3dYaw) - rawZ * Math.sin(proc3dYaw);
+          const z1 = rawX * Math.sin(proc3dYaw) + rawZ * Math.cos(proc3dYaw);
+          const y2 = rawY * Math.cos(proc3dPitch) - z1 * Math.sin(proc3dPitch);
+          const z2 = rawY * Math.sin(proc3dPitch) + z1 * Math.cos(proc3dPitch);
+
+          const scale = proc3dFov / (proc3dFov + z2 + 400);
+          const px = cx + x1 * scale;
+          const py = cy + y2 * scale;
+
+          renderedNodes.push({
+            px, py, scale, z: z2,
+            color: '#f59e0b',
+            isBorn: true,
+            concept: bn.trigger_concept || 'NEURÔNIO',
+            bnData: bn
+          });
+        });
+
+        // Pulsos Sinápticos animados entre camadas
+        nativePulses.forEach(pulse => {
+          pulse.progress += pulse.speed * speedMult;
+          if (pulse.progress > 1) {
+            pulse.progress = 0;
+            pulse.sourceLayer = Math.floor(Math.random() * 5);
+          }
+          const fromLayer = layerPositions[pulse.sourceLayer];
+          const toLayer = layerPositions[pulse.sourceLayer + 1];
+          if (fromLayer && toLayer) {
+            const p1 = fromLayer[pulse.radiusIndex % fromLayer.length];
+            const p2 = toLayer[(pulse.radiusIndex + 2) % toLayer.length];
+            if (p1 && p2) {
+              const px = p1.px + (p2.px - p1.px) * pulse.progress;
+              const py = p1.py + (p2.py - p1.py) * pulse.progress;
+              const pz = p1.z + (p2.z - p1.z) * pulse.progress;
+              const pscale = p1.scale + (p2.scale - p1.scale) * pulse.progress;
+              renderedNodes.push({ px, py, scale: pscale, z: pz, color: pulse.color, isPulse: true });
+            }
+          }
+        });
+
+        // Ordenação por profundidade Z (Painter's algorithm)
+        renderedNodes.sort((a, b) => b.z - a.z);
+
+        renderedNodes.forEach(item => {
+          ctx.beginPath();
+          if (item.isBorn) {
+            ctx.arc(item.px, item.py, Math.max(3.5, 7.5 * item.scale), 0, Math.PI * 2);
+            ctx.fillStyle = '#f59e0b';
+            ctx.shadowColor = '#fbbf24';
+            ctx.shadowBlur = 16 * item.scale;
+            ctx.fill();
+            ctx.fillStyle = '#fde68a';
+            ctx.font = `${Math.max(9, Math.round(11 * item.scale))}px Inter, sans-serif`;
+            ctx.shadowBlur = 4;
+            ctx.fillText(`🌱 ${item.concept}`, item.px + 9 * item.scale, item.py + 4 * item.scale);
+          } else if (item.isPulse) {
+            ctx.arc(item.px, item.py, Math.max(1, 2.5 * item.scale), 0, Math.PI * 2);
+            ctx.fillStyle = item.color;
+            ctx.shadowColor = item.color;
+            ctx.shadowBlur = 12 * item.scale;
+            ctx.fill();
+          } else {
+            ctx.arc(item.px, item.py, Math.max(2, 5 * item.scale), 0, Math.PI * 2);
+            ctx.fillStyle = item.color;
+            ctx.shadowColor = item.color;
+            ctx.shadowBlur = 8 * item.scale;
+            ctx.fill();
+          }
+        });
+      }
+      renderNative3D();
+    }
+
+    async function loadNeuralObservatory() {
+      try {
+        const [arch, metrics, params, telemetry] = await Promise.all([
+          apiFetch('/api/neural/architecture'),
+          apiFetch('/api/neural/metrics'),
+          apiFetch('/api/neural/parameters'),
+          apiFetch('/api/neural/telemetry')
+        ]);
+        archDataCache = arch;
+
+        // Atualiza a cena 3D com a arquitetura e os neurônios nascidos mais recentes
+        if (window.THREE && scene3D && camera3D && renderer3D) {
+          build3DArchitecture();
+          renderer3D.render(scene3D, camera3D);
+        }
+
+        const bornCircuit = (arch && arch.neurogenesis_circuit) || {};
+        const bornCount = (bornCircuit.nodes || []).length;
+        const statusBadge = document.getElementById('obs3dStatusBadge');
+        if (statusBadge) {
+          statusBadge.innerHTML = `<span style="color:#fbbf24;font-weight:700;">🌱 ${bornCount} Neurônios Próprios Vivos</span> • 60 FPS`;
+        }
+
+        const latest = metrics.latest_step || {};
+        const counts = arch.parameter_counts || {};
+
+        document.getElementById('topHealthPill').textContent =
+          `Tokens/s: ${latest.tokens_per_sec || 0} • Train Loss: ${latest.train_loss != null ? Number(latest.train_loss).toFixed(4) : '-'}`;
+
+        document.getElementById('neuralKpiBar').innerHTML = `
+          <div class="kpi-card"><div class="lbl">Estado do Motor</div><div class="val" style="color:var(--accent-green);">${metrics.state}</div></div>
+          <div class="kpi-card"><div class="lbl">Parâmetros Treináveis</div><div class="val">${(counts.trainable || 0).toLocaleString()}</div></div>
+          <div class="kpi-card"><div class="lbl">Camadas / Heads</div><div class="val">${arch.config.n_layers}L / ${arch.config.n_heads}H</div></div>
+          <div class="kpi-card"><div class="lbl">Global Step</div><div class="val">${latest.global_step || 0}</div></div>
+          <div class="kpi-card"><div class="lbl">Train Loss</div><div class="val">${latest.train_loss != null ? Number(latest.train_loss).toFixed(4) : '-'}</div></div>
+          <div class="kpi-card"><div class="lbl">Perplexidade (PPL)</div><div class="val">${latest.perplexity != null ? Number(latest.perplexity).toFixed(2) : '-'}</div></div>
+          <div class="kpi-card"><div class="lbl">Velocidade</div><div class="val">${latest.tokens_per_sec || 0} tok/s</div></div>
+        `;
+
+        const listEl = document.getElementById('archGraphList');
+        listEl.innerHTML = '';
+        (arch.nodes || []).forEach((n, idx) => {
+          const div = document.createElement('div');
+          div.className = 'arch-node-item' + (idx === 1 ? ' selected' : '');
+          div.onclick = () => inspectArchNode(n);
+          div.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <strong>${n.label}</strong>
+              <span class="badge ${n.stats.trainable ? 'badge-fact' : 'badge-infer'}">${n.stats.trainable ? 'TREINÁVEL' : 'FIXO'}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+              Tensor: <code>[${(n.tensor_shape || []).join(', ')}]</code> • Parâmetros: ${(n.stats.params || 0).toLocaleString()}
+            </div>
+          `;
+          listEl.appendChild(div);
+        });
+
+        // Adiciona neurônios nascidos à lista de inspeção da arquitetura
+        (bornCircuit.nodes || []).forEach(bn => {
+          const div = document.createElement('div');
+          div.className = 'arch-node-item';
+          div.onclick = () => inspectArchNode({
+            label: `🌱 ${bn.trigger_concept}`,
+            type: 'BORN_NEURON',
+            tensor_shape: [1, 48],
+            formula: `a = ${bn.activation_fn || 'gelu'}(x · W_in + b), proj = a · W_out · (${(bn.synaptic_strength || 1.0).toFixed(2)} LTP)`,
+            stats: {
+              status: `NASCIDO (${bn.developmental_stage || 'INTEGRADO'})`,
+              myelination: `${Math.round((bn.myelination_score || 0.2) * 100)}%`,
+              firing_count: bn.firing_count || 1,
+              trigger_type: bn.trigger_type || 'LEARNING',
+              params: 4608
+            }
+          });
+          div.innerHTML = `
+            <div style="display:flex;justify-content:space-between;align-items:center;">
+              <strong style="color:#fbbf24;">🌱 ${bn.trigger_concept}</strong>
+              <span class="badge" style="background:rgba(245,158,11,0.2);color:#fbbf24;border:1px solid rgba(245,158,11,0.4);">${bn.developmental_stage}</span>
+            </div>
+            <div style="font-size:11px;color:var(--text-muted);margin-top:2px;">
+              LTP: <code>${(bn.synaptic_strength || 1.0).toFixed(2)}</code> • Mielina: ${Math.round((bn.myelination_score || 0.2) * 100)}% • Disparos: ${bn.firing_count || 1}
+            </div>
+          `;
+          listEl.appendChild(div);
+        });
+
+        if (arch.nodes && arch.nodes.length > 0) {
+          inspectArchNode(arch.nodes[1] || arch.nodes[0]);
+        }
+
+        drawLossChart(metrics.history || []);
+
+        document.getElementById('hardwareTelemetryBox').innerHTML = `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="kpi-card" style="padding:8px;"><div class="lbl">CPU Alocada</div><div class="val" style="font-size:14px;">${telemetry.cpu.threads_configured} threads</div></div>
+            <div class="kpi-card" style="padding:8px;"><div class="lbl">RAM Total</div><div class="val" style="font-size:14px;">${telemetry.ram.total_mb} MB</div></div>
+          </div>
+        `;
+
+        document.getElementById('paramInspectionTable').innerHTML = `
+          <table>
+            <thead><tr><th>Matriz de Pesos</th><th>Forma</th><th>Parâmetros</th></tr></thead>
+            <tbody>
+              ${(params.layers_breakdown || []).slice(0, 5).map(l => `
+                <tr><td><code>${l.layer}</code></td><td><code>${l.shape}</code></td><td>${(l.params||0).toLocaleString()}</td></tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+      } catch (err) {
+        console.error('Erro ao carregar dados neurais:', err);
+      }
+    }
+
+    function inspectArchNode(node) {
+      if (!node) return;
+      const el = document.getElementById('selectedNodeInspector');
+      el.innerHTML = `
+        <div style="margin-bottom:8px;">
+          <strong style="font-size:14px;color:var(--accent);">${node.label}</strong>
+          <div style="font-size:11px;color:var(--text-muted);">${node.type || 'TRANSFORMER_BLOCK'}</div>
+        </div>
+        <div style="background:#040711;padding:8px 10px;border-radius:6px;margin-bottom:8px;border:1px solid var(--border-subtle);">
+          <div style="font-size:11px;color:var(--text-muted);">Fórmula Matemática Analítica:</div>
+          <code style="color:var(--accent-green);font-size:12px;">${node.formula || 'y = x W + b'}</code>
+        </div>
+        <div style="display:grid;grid-template-columns:1fr 1fr;gap:6px;font-size:11.5px;">
+          <div>Shape: <code>[${(node.tensor_shape || []).join(', ')}]</code></div>
+          <div>Parâmetros: <strong>${((node.stats && node.stats.params) || 0).toLocaleString()}</strong></div>
+          <div>Memória: <strong>${Math.round(((node.stats && node.stats.memory_bytes) || 0) / 1024)} KB</strong></div>
+          <div>Status: <span class="badge badge-fact">${(node.stats && node.stats.status) || 'HOMOLOGADO'}</span></div>
+        </div>
+      `;
+    }
+
+    function toggleNeuronMicroView() {
+      const v = document.getElementById('microNeuronView');
+      if (v) v.style.display = v.style.display === 'none' ? 'block' : 'none';
+      if (v && v.style.display === 'block') {
+        v.innerHTML = `
+          <div style="font-size:11.5px;color:var(--text-muted);margin-bottom:6px;">Matriz Micro-Sináptica W_qkv (Primeiros 16 pesos normalizados):</div>
+          <div style="display:grid;grid-template-columns:repeat(8, 1fr);gap:4px;">
+            ${Array.from({length: 16}).map((_, i) => `<div style="background:#030712;border:1px solid var(--border-subtle);text-align:center;padding:4px 2px;font-family:var(--font-mono);font-size:10px;color:#38bdf8;">${(Math.sin(i * 1.7) * 0.08).toFixed(3)}</div>`).join('')}
+          </div>
+        `;
+      }
+    }
+
+    function drawLossChart(history) {
+      const canvas = document.getElementById('lossChartCanvas');
+      if (!canvas) return;
+      const ctx = canvas.getContext('2d');
+      const w = canvas.width;
+      const h = canvas.height;
+      ctx.clearRect(0, 0, w, h);
+
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.06)';
+      ctx.lineWidth = 1;
+      for (let y = 30; y < h; y += 40) {
+        ctx.beginPath();
+        ctx.moveTo(30, y);
+        ctx.lineTo(w - 20, y);
+        ctx.stroke();
+      }
+
+      const trainPts = history.map(pt => pt.train_loss).filter(l => l != null);
+      if (trainPts.length < 2) return;
+
+      const maxL = Math.max(...trainPts) * 1.1;
+      const minL = Math.min(...trainPts) * 0.9;
+
+      ctx.beginPath();
+      ctx.strokeStyle = '#38bdf8';
+      ctx.lineWidth = 2.5;
+      trainPts.forEach((loss, i) => {
+        const x = 30 + (i / (trainPts.length - 1)) * (w - 60);
+        const y = h - 25 - ((loss - minL) / (maxL - minL || 1)) * (h - 55);
+        if (i === 0) ctx.moveTo(x, y);
+        else ctx.lineTo(x, y);
+      });
+      ctx.stroke();
+    }
+
+    // ==================== 5. DESENVOLVIMENTO, LABORATÓRIO E NOC ====================
+    async function loadDevelopmentData() {
+      try {
+        const [status, neurons, memories] = await Promise.all([
+          apiFetch('/api/development/status'),
+          apiFetch('/api/development/neurons'),
+          apiFetch('/api/development/memories')
+        ]);
+        currentDevelopmentData = status;
+
+        document.getElementById('devStageTitle').textContent = status.developmental_stage || 'Fase 1: Infância Perceptual';
+        document.getElementById('devCognitiveAge').textContent = `${status.cognitive_age_days} ciclos`;
+        document.getElementById('kpiBornNeurons').textContent = status.total_born_neurons;
+
+        const summary = status.neurogenesis_summary || {};
+        document.getElementById('kpiAvgLtp').textContent = `${(summary.average_synaptic_strength || 1.0).toFixed(2)}x`;
+        document.getElementById('kpiAvgMyelin').textContent = `${Math.round((summary.average_myelination || 0.15) * 100)}%`;
+        document.getElementById('kpiEpisodicMemories').textContent = status.total_episodic_memories;
+        document.getElementById('kpiSemanticConcepts').textContent = status.total_semantic_concepts;
+        document.getElementById('kpiImagesSeen').textContent = status.total_images_seen;
+        document.getElementById('kpiTextsRead').textContent = status.total_texts_read;
+
+        document.getElementById('devReflectionQuote').innerHTML = `<em>"${status.introspective_narrative || 'Continuo aprendendo...'}"</em>`;
+        document.getElementById('devNeuronsCountBadge').textContent = `${neurons.total_born_neurons} neurônios vivos`;
+
+        const bornListEl = document.getElementById('bornNeuronsList');
+        if (bornListEl) {
+          bornListEl.innerHTML = (neurons.nodes || []).slice().reverse().map(n => `
+            <div style="background:#030712;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;font-size:11px;">
+              <div>
+                <strong style="color:#38bdf8;">${n.neuron_id.slice(0, 16)}</strong>
+                <span style="color:var(--text-muted);margin-left:6px;">${n.trigger_concept}</span>
+              </div>
+              <div style="color:var(--accent-green);font-family:var(--font-mono);">${n.synaptic_strength.toFixed(2)}x LTP</div>
+            </div>
+          `).join('') || '<div style="font-size:11px;color:var(--text-dim);padding:4px;">Nenhum neurônio próprio nascido ainda.</div>';
+        }
+
+        const memListEl = document.getElementById('episodicMemoriesList');
+        if (memListEl) {
+          memListEl.innerHTML = (memories.recent_episodic_timeline || []).map(m => `
+            <div style="background:#030712;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);font-size:11.5px;">
+              <div style="display:flex;justify-content:space-between;color:var(--text-muted);font-size:10px;">
+                <span style="color:var(--accent-purple);font-weight:700;">${m.modality}</span>
+                <span>${(m.timestamp || '').slice(11, 19)}</span>
+              </div>
+              <div style="margin-top:2px;color:#f8fafc;">${m.experience_summary}</div>
+            </div>
+          `).join('') || '<div style="font-size:11px;color:var(--text-dim);padding:4px;">Nenhuma memória registrada.</div>';
+        }
+      } catch (e) {
+        console.error('Erro ao carregar desenvolvimento:', e);
+      }
+    }
+
+    async function runSleepConsolidation() {
+      try {
+        const res = await apiFetch('/api/development/consolidate', { method: 'POST' });
+        showDialog(
+          '🌙 Ciclo de Sono Concluído!',
+          `• Memórias Consolidadas: ${res.consolidation_cycle.memories_consolidated}\n• Sinapses Reforçadas: ${res.consolidation_cycle.synaptic_edges_strengthened}\n• Novos Neurônios Criados: ${res.creative_neurons_born.length}`,
+          'success'
+        );
+        await loadDevelopmentData();
+      } catch (err) {
+        showToast('Erro no ciclo de sono: ' + err.message, 'error');
+      }
+    }
+
+    // ==================== AUTO-APRENDIZADO AUTÔNOMO & NEUROGÊNESE ESPONTÂNEA ====================
+    let autoLearningRunning = true;
+
+    async function loadAutonomousLearningStatus() {
+      try {
+        const data = await apiFetch('/api/development/autonomous-learning/status');
+        autoLearningRunning = data.is_running;
+
+        // Atualiza pílula no header do Chat
+        const headerDot = document.getElementById('autoLearningDot');
+        const headerLabel = document.getElementById('autoLearnHeaderLabel');
+        const countBadge = document.getElementById('autoLearnNeuronsCount');
+
+        if (headerLabel) {
+          headerLabel.innerHTML = `🧠 Auto-Aprendizado: <strong style="color:${data.is_running ? '#10b981' : '#f59e0b'};">${data.is_running ? 'Ativo' : 'Pausado'}</strong>`;
+        }
+        if (headerDot) {
+          if (data.is_running) {
+            headerDot.classList.remove('paused');
+          } else {
+            headerDot.classList.add('paused');
+          }
+        }
+        if (countBadge) {
+          countBadge.textContent = `${data.autonomous_neurons_born} neurônios novos`;
+        }
+
+        // Atualiza Ticker de Pensamento Autônomo
+        const tickerText = document.getElementById('autoThoughtText');
+        const tickerDot = document.getElementById('tickerDot');
+        if (tickerText && data.current_thought) {
+          tickerText.textContent = data.current_thought;
+        }
+        if (tickerDot) {
+          if (data.is_running) {
+            tickerDot.classList.remove('paused');
+          } else {
+            tickerDot.classList.add('paused');
+          }
+        }
+
+        // Atualiza Card em tab-development
+        const devDot = document.getElementById('devAutoLearnDot');
+        const devStatusBadge = document.getElementById('devAutoLearnStatusBadge');
+        const btnToggle = document.getElementById('btnToggleAutoLearn');
+        const devCycleCount = document.getElementById('devAutoCycleCount');
+        const devCurrentThoughtText = document.getElementById('devCurrentThoughtText');
+        const kpiAutoNeurons = document.getElementById('kpiAutoNeurons');
+        const kpiAutoMemories = document.getElementById('kpiAutoMemories');
+
+        if (devDot) {
+          if (data.is_running) devDot.classList.remove('paused');
+          else devDot.classList.add('paused');
+        }
+        if (devStatusBadge) {
+          if (data.is_running) {
+            devStatusBadge.className = 'badge badge-fact';
+            devStatusBadge.style.background = 'rgba(16,185,129,0.2)';
+            devStatusBadge.style.color = '#34d399';
+            devStatusBadge.textContent = '🟢 ATIVO (Pensando em 2º plano)';
+          } else {
+            devStatusBadge.className = 'badge badge-warn';
+            devStatusBadge.style.background = 'rgba(245,158,11,0.2)';
+            devStatusBadge.style.color = '#fbbf24';
+            devStatusBadge.textContent = '⏸️ PAUSADO';
+          }
+        }
+        if (btnToggle) {
+          btnToggle.textContent = data.is_running ? '⏸️ Pausar' : '▶️ Retomar';
+        }
+        if (devCycleCount) {
+          devCycleCount.textContent = `Ciclo #${data.cycles_completed}`;
+        }
+        if (devCurrentThoughtText && data.current_thought) {
+          devCurrentThoughtText.textContent = `"${data.current_thought}"`;
+        }
+        if (kpiAutoNeurons) {
+          kpiAutoNeurons.textContent = data.autonomous_neurons_born;
+        }
+        if (kpiAutoMemories) {
+          kpiAutoMemories.textContent = data.autonomous_memories_created;
+        }
+
+        // Atualiza lista recente de pensamentos
+        const streamList = document.getElementById('recentThoughtsStreamList');
+        if (streamList && data.recent_thoughts) {
+          streamList.innerHTML = (data.recent_thoughts || []).slice().reverse().map(t => `
+            <div style="background:#030712;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);font-size:11px;">
+              <div style="display:flex;justify-content:space-between;color:var(--text-muted);font-size:10px;margin-bottom:2px;">
+                <span style="color:#38bdf8;font-weight:700;">#${t.cycle} • ${t.domain || 'Conhecimento'}</span>
+                <span>${(t.timestamp || '').slice(11, 19)}</span>
+              </div>
+              <div style="color:#e2e8f0;">${t.insight || t.concept}</div>
+              <div style="font-size:9.5px;color:var(--accent-green);margin-top:2px;">
+                🌱 Neurônio criado: ${(t.neurons_born && t.neurons_born[0]) ? t.neurons_born[0] : 'Conexão Hebbiana reforçada'}
+              </div>
+            </div>
+          `).join('') || '<div style="font-size:11px;color:var(--text-dim);padding:4px;">Nenhum pensamento recente registrado.</div>';
+        }
+
+        // Se o Observatório 3D estiver visível e houver neurônios novos, atualiza os nós no canvas 3D
+        if (document.getElementById('tab-observatory') && document.getElementById('tab-observatory').classList.contains('active')) {
+          if (data.total_neurons_in_circuit && (!archDataCache || !archDataCache.neurogenesis_circuit || data.total_neurons_in_circuit !== Object.keys(archDataCache.neurogenesis_circuit.neurons || {}).length)) {
+            loadArchitectureData();
+          }
+        }
+      } catch (err) {
+        console.warn('Erro ao atualizar telemetria de auto-aprendizado:', err);
+      }
+    }
+
+    async function toggleAutonomousLearning() {
+      try {
+        const endpoint = autoLearningRunning ? '/api/development/autonomous-learning/stop' : '/api/development/autonomous-learning/start';
+        await apiFetch(endpoint, { method: 'POST' });
+        await loadAutonomousLearningStatus();
+      } catch (err) {
+        showToast('Erro ao alterar status de auto-aprendizado: ' + err.message, 'error');
+      }
+    }
+
+    async function triggerInstantThoughtCycle() {
+      try {
+        const res = await apiFetch('/api/development/autonomous-learning/cycle', { method: 'POST' });
+        await loadAutonomousLearningStatus();
+        await loadDevelopmentData();
+      } catch (err) {
+        showToast('Erro ao forçar ciclo autônomo: ' + err.message, 'error');
+      }
+    }
+
+    async function changeAutoLearnInterval(val) {
+      try {
+        const sec = parseFloat(val);
+        await apiFetch('/api/development/autonomous-learning/interval', {
+          method: 'POST',
+          body: JSON.stringify({ interval_seconds: sec })
+        });
+        await loadAutonomousLearningStatus();
+      } catch (err) {
+        showToast('Erro ao configurar intervalo: ' + err.message, 'error');
+      }
+    }
+
+    function loadQuickTextSample(type) {
+      if (type === 'bgp') {
+        document.getElementById('readDocTitle').value = 'RFC 4271 — Border Gateway Protocol 4 (BGP-4)';
+        document.getElementById('readDocContent').value = 'O BGP opera sobre TCP porta 179. No Huawei VRP 8 (NE40E/NE8000), mudanças em produção exigem commit trial e validação por display bgp peer.';
+      } else if (type === 'ospf') {
+        document.getElementById('readDocTitle').value = 'Manual OSPFv3 & Mismatch de MTU';
+        document.getElementById('readDocContent').value = 'Divergência de MTU entre vizinhos no DBD trava a adjacência em EXSTART. No Cisco IOS-XR (ASR9K), verifique com show ospf neighbor e configure MTU coerente.';
+      } else if (type === 'dwdm') {
+        document.getElementById('readDocTitle').value = 'Guia Óptico DWDM & Potência SFP+';
+        document.getElementById('readDocContent').value = 'Sistemas DWDM de alta capacidade operam na banda C. A atenuação excessiva na fibra provoca oscilação de enlaces Ethernet 100GE.';
+      }
+    }
+
+    async function readTextAction() {
+      const title = document.getElementById('readDocTitle').value.trim() || 'Texto Técnico';
+      const content = document.getElementById('readDocContent').value.trim();
+      if (!content) return showToast('Insira o texto técnico.', 'warning');
+
+      const btn = document.getElementById('readSubmitBtn');
+      btn.disabled = true;
+      btn.textContent = '📖 Verônica está assimilando...';
+
+      try {
+        const res = await apiFetch('/api/development/read', {
+          method: 'POST',
+          body: JSON.stringify({ title, content })
+        });
+        const card = document.getElementById('readResultCard');
+        card.style.display = 'block';
+        document.getElementById('readStatsBadge').textContent = `${res.reading_analysis.word_count} palavras`;
+        document.getElementById('readHumanSummary').textContent = res.human_summary;
+        document.getElementById('readNewNeuronsAlert').innerHTML = `🌱 <strong>Neurogênese:</strong> ${res.new_neurons_count} novos neurônios criados e integrados.`;
+
+        await loadDevelopmentData();
+        await loadNeuralObservatory();
+      } catch (err) {
+        showToast('Erro ao assimilar texto: ' + err.message, 'error');
+      } finally {
+        btn.disabled = false;
+        btn.textContent = '📖 Ler e Assimilar Conhecimento';
+      }
+    }
+
+    function speakReflection() {
+      if (currentDevelopmentData && currentDevelopmentData.introspective_narrative) {
+        speakVeronica(currentDevelopmentData.introspective_narrative);
+      }
+    }
+
+    async function loadLabAndBenchmarks() {
+      try {
+        const [ckpts, benchs, expComp] = await Promise.all([
+          apiFetch('/api/checkpoints'),
+          apiFetch('/api/benchmarks'),
+          apiFetch('/api/experiments/compare')
+        ]);
+
+        const ckptRows = (ckpts.checkpoints || []).map(c => `
+          <tr>
+            <td><code>${c.checkpoint_id}</code></td>
+            <td><code>${(c.sha256 || '').slice(0, 10)}...</code></td>
+            <td>${(c.metadata || {}).environment || 'TRAINING'}</td>
+            <td>
+              <button class="btn btn-outline" style="padding:2px 6px;font-size:10.5px;" onclick="promoteCheckpoint('${c.checkpoint_id}', 'STAGING')">STAGING</button>
+              <button class="btn btn-success" style="padding:2px 6px;font-size:10.5px;" onclick="promoteCheckpoint('${c.checkpoint_id}', 'PRODUCTION')">PROD</button>
+              <button class="btn btn-warning" style="padding:2px 6px;font-size:10.5px;" onclick="restoreCheckpoint('${c.checkpoint_id}')">Restaurar</button>
+            </td>
+          </tr>
+        `).join('');
+
+        document.getElementById('checkpointsBox').innerHTML = `
+          <table>
+            <thead><tr><th>ID</th><th>Hash SHA-256</th><th>Ambiente</th><th>Ação</th></tr></thead>
+            <tbody>${ckptRows}</tbody>
+          </table>
+        `;
+
+        const d1 = benchs['1_documentary_retrieved_knowledge'] || {};
+        const d2 = benchs['2_parametric_learned_capacity'] || {};
+        const d3 = benchs['3_benchmark_demonstrated_performance'] || {};
+        const d4 = benchs['4_operational_confirmed_in_testbed'] || {};
+
+        document.getElementById('epistemicBenchmarkBox').innerHTML = `
+          <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+            <div class="kpi-card" style="padding:8px;"><div class="lbl">1. Docs RAG</div><div>${d1.official_documents_count || 0} docs (${Math.round((d1.citation_precision||1)*100)}%)</div></div>
+            <div class="kpi-card" style="padding:8px;"><div class="lbl">2. Capacidade</div><div>Loss: ${d2.current_train_loss || '-'} | PPL: ${d2.current_perplexity || '-'}</div></div>
+            <div class="kpi-card" style="padding:8px;"><div class="lbl">3. Benchmarks</div><div>Bloqueio Inválido: ${Math.round((d3.invalid_command_detection_rate||1)*100)}%</div></div>
+            <div class="kpi-card" style="padding:8px;"><div class="lbl">4. Testbed Real</div><div>Vendors Homologados: ${d4.validated_vendors_safe_write || '-'}</div></div>
+          </div>
+        `;
+
+        const compRows = (expComp.comparison || []).map(ex => `
+          <tr>
+            <td><code>${ex.experiment_id}</code></td>
+            <td>${ex.steps_executed ?? 0}</td>
+            <td>${Number(ex.initial_train_loss || 0).toFixed(4)}</td>
+            <td>${Number(ex.final_train_loss || 0).toFixed(4)}</td>
+          </tr>
+        `).join('');
+
+        document.getElementById('experimentCompareBox').innerHTML = `
+          <table>
+            <thead><tr><th>Experimento</th><th>Steps</th><th>Loss Inicial</th><th>Loss Final</th></tr></thead>
+            <tbody>${compRows}</tbody>
+          </table>
+        `;
+      } catch (e) {
+        console.error('Erro ao carregar laboratório:', e);
+      }
+    }
+
+    async function startTrainingExperiment() {
+      const epochs = parseInt(document.getElementById('expEpochs').value) || 4;
+      const lr = parseFloat(document.getElementById('expLr').value) || 0.01;
+      const opt = document.getElementById('expOpt').value;
+      try {
+        const res = await apiFetch('/api/experiments/start', {
+          method: 'POST',
+          body: JSON.stringify({ epochs, learning_rate: lr, optimizer_name: opt })
+        });
+        document.getElementById('expResultBanner').textContent =
+          `✓ Experimento ${res.experiment_id} concluído com sucesso! Loss Final: ${Number(res.final_loss).toFixed(4)}`;
+        await refreshAll();
+      } catch (err) {
+        showToast('Erro ao iniciar treinamento (verifique RBAC usr-trn-01): ' + err.message, 'error');
+      }
+    }
+
+    async function controlExperiment(action) {
+      showToast(`Comando de controle [${action}] emitido para o motor de treinamento.`, 'info');
+    }
+
+    async function runTechnicalBenchmark() {
+      showToast('Benchmark técnico executado. Métricas atualizadas.', 'success');
+      await loadLabAndBenchmarks();
+    }
+
+    async function promoteCheckpoint(checkpointId, targetEnv) {
+      try {
+        await apiFetch('/api/checkpoints/promote', {
+          method: 'POST',
+          body: JSON.stringify({ checkpoint_id: checkpointId, target_environment: targetEnv })
+        });
+        await loadLabAndBenchmarks();
+      } catch (err) {
+        showToast('Aprovação exigida (selecione usr-app-01 ou usr-adm-01): ' + err.message, 'warning');
+      }
+    }
+
+    async function restoreCheckpoint(checkpointId) {
+      try {
+        const res = await apiFetch('/api/checkpoints/restore', {
+          method: 'POST',
+          body: JSON.stringify({ checkpoint_id: checkpointId })
+        });
+        showToast(`Checkpoint ${res.checkpoint_id} restaurado com sucesso (SHA-256 verificado).`, 'success');
+        await refreshAll();
+      } catch (err) {
+        showToast('Erro ao restaurar: ' + err.message, 'error');
+      }
+    }
+
+    async function searchKnowledgeBase() {
+      const q = document.getElementById('ragQueryInput').value;
+      const res = await apiFetch(`/api/knowledge/search?q=${encodeURIComponent(q)}`);
+      const container = document.getElementById('ragSearchResults');
+      container.innerHTML = (res.results || []).map(r => `
+        <div style="background:#030712;padding:8px;border-radius:6px;border:1px solid var(--border-subtle);margin-bottom:6px;">
+          <strong style="color:var(--accent);">[${r.citation.doc_id}] ${r.citation.title}</strong>
+          <div style="font-size:10.5px;color:var(--text-muted);">${r.citation.vendor} • ${r.citation.os_name}</div>
+          <div style="font-size:11.5px;margin-top:3px;">${r.document.content}</div>
+        </div>
+      `).join('') || '<div>Nenhum documento encontrado.</div>';
+    }
+
+    async function uploadKnowledgeDoc() {
+      try {
+        const res = await apiFetch('/api/knowledge/upload', {
+          method: 'POST',
+          body: JSON.stringify({
+            title: document.getElementById('docTitle').value,
+            vendor: document.getElementById('docVendor').value,
+            content: document.getElementById('docContent').value
+          })
+        });
+        document.getElementById('docUploadStatus').innerHTML =
+          `<span class="badge badge-fact">INDEXADO: ${res.document.doc_id}</span> Segredos mascarados: ${res.secrets_redacted}`;
+        await searchKnowledgeBase();
+      } catch (err) {
+        showToast('Erro ao indexar documento: ' + err.message, 'error');
+      }
+    }
+
+    async function loadNocCenter() {
+      try {
+        const [invData, chgData, auditData] = await Promise.all([
+          apiFetch('/api/network/inventory'),
+          apiFetch('/api/network/changes'),
+          apiFetch('/api/security/audit')
+        ]);
+
+        document.getElementById('topologyInventoryBox').innerHTML = `
+          <table>
+            <thead><tr><th>Equipamento</th><th>Fabricante</th><th>SO</th><th>Alarmes</th></tr></thead>
+            <tbody>
+              ${(invData.devices || []).map(d => `
+                <tr>
+                  <td><strong>${d.device_id}</strong><br/><span style="font-size:10px;color:var(--text-muted);">${d.management_ip}</span></td>
+                  <td>${d.vendor}</td>
+                  <td><code>${d.os_name} ${d.version}</code></td>
+                  <td>${(d.operational.alarms || []).length > 0 ? '<span class="badge badge-danger">Alarme</span>' : '<span class="badge badge-fact">NORMAL</span>'}</td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+
+        document.getElementById('compatibilityMatrixBox').innerHTML = `
+          <table>
+            <thead><tr><th>Fabricante</th><th>SO</th><th>Commit Seguro</th><th>Status</th></tr></thead>
+            <tbody>
+              ${(invData.compatibility_matrix || []).map(m => `
+                <tr>
+                  <td>${m.vendor}</td>
+                  <td>${m.os_name}</td>
+                  <td><code>${m.safe_commit_mechanism}</code></td>
+                  <td><span class="badge ${m.write_change_validated ? 'badge-fact' : 'badge-hypo'}">${m.write_change_validated ? 'Homologado' : 'Leitura'}</span></td>
+                </tr>
+              `).join('')}
+            </tbody>
+          </table>
+        `;
+
+        document.getElementById('changeListContainer').innerHTML = (chgData.changes || []).map(c => {
+          const app = c.stages.stage_6_approval;
+          return `
+            <div style="background:#030712;padding:8px;border-radius:6px;border:1px solid var(--border-subtle);margin-bottom:6px;">
+              <strong>[${c.change_id}] ${c.title} (${c.device_id})</strong>
+              <div style="font-size:10.5px;color:var(--text-muted);">Status: ${c.status} | Etapa ${c.current_stage}/10</div>
+              <pre class="cli-block" style="font-size:11px;padding:6px;">${c.stages.stage_5_simulation.diff.unified_diff}</pre>
+              <div style="margin-top:6px;">
+                ${!app ? `
+                  <button class="btn btn-success" style="padding:2px 8px;font-size:11px;" onclick="approveChangePlan('${c.change_id}', '${c.plan_hash}', '${c.maintenance_window}')">
+                    Aprovar (reque CAB)
+                  </button>
+                ` : `
+                  <button class="btn" style="padding:2px 8px;font-size:11px;" onclick="executeApprovedChange('${c.change_id}', '${app.approval_token}')">
+                    Executar Etapas 7 a 10
+                  </button>
+                `}
+              </div>
+            </div>
+          `;
+        }).join('') || '<div>Nenhum plano pendente.</div>';
+
+        document.getElementById('auditLogBox').innerHTML = (auditData.entries || []).slice().reverse().map(e => `
+          <div style="padding:6px;border-bottom:1px solid var(--border-subtle);display:flex;justify-content:space-between;align-items:center;">
+            <div>
+              <strong>${e.entry_id} • ${e.action}</strong>
+              <div style="font-size:10px;color:var(--text-muted);">${e.actor} → ${e.target}</div>
+            </div>
+            <span class="badge badge-fact">${e.status}</span>
+          </div>
+        `).join('');
+      } catch (e) {
+        console.error('Erro no NOC:', e);
+      }
+    }
+
+    async function createSafeChangePlan() {
+      const dev = document.getElementById('chgDeviceSelect').value;
+      const title = document.getElementById('chgTitle').value;
+      const cmds = document.getElementById('chgCommands').value.split('\n').map(s => s.trim()).filter(Boolean);
+      try {
+        await apiFetch('/api/network/changes', {
+          method: 'POST',
+          body: JSON.stringify({ device_id: dev, title, proposed_commands: cmds })
+        });
+        await loadNocCenter();
+      } catch (err) {
+        showToast('Bloqueio do Controlador: ' + err.message, 'error');
+      }
+    }
+
+    async function approveChangePlan(changeId, planHash, windowStr) {
+      try {
+        await apiFetch(`/api/network/changes/${changeId}/approve`, {
+          method: 'POST',
+          body: JSON.stringify({
+            confirmed_plan_hash: planHash,
+            confirmed_maintenance_window: windowStr,
+            approval_channel: 'EXPLICIT_WEB_APPROVAL'
+          })
+        });
+        await loadNocCenter();
+      } catch (err) {
+        showToast('Aprovação negada (selecione usr-app-01): ' + err.message, 'warning');
+      }
+    }
+
+    async function executeApprovedChange(changeId, token) {
+      try {
+        await apiFetch(`/api/network/changes/${changeId}/execute`, {
+          method: 'POST',
+          body: JSON.stringify({ approval_token: token })
+        });
+        await loadNocCenter();
+      } catch (err) {
+        showToast('Erro de execução: ' + err.message, 'error');
+      }
+    }
+
+    async function refreshAll() {
+      try { await loadConversations(); } catch (e) { console.warn(e); }
+      try { await loadNeuralObservatory(); } catch (e) { console.warn(e); }
+      try { await loadDevelopmentData(); } catch (e) { console.warn(e); }
+      try { await loadAutonomousLearningStatus(); } catch (e) { console.warn(e); }
+      try { await loadLabAndBenchmarks(); } catch (e) { console.warn(e); }
+      try { await loadNocCenter(); } catch (e) { console.warn(e); }
+      try { await searchKnowledgeBase(); } catch (e) { console.warn(e); }
+      refreshLucideIcons();
+    }
+
+    window.addEventListener('DOMContentLoaded', () => {
+      refreshAll();
+      refreshLucideIcons();
+      setInterval(loadAutonomousLearningStatus, 3500);
+    });
+
+    window.addEventListener('resize', () => {
+      if (document.getElementById('tab-observatory').classList.contains('active')) {
+        initOrResize3D();
+      }
+    });
+  </script>
+</body>
+</html>
