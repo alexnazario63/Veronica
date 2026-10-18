@@ -341,7 +341,10 @@ class BinaryMachineMemoryStore:
         target_path = Path(filepath)
         target_path.parent.mkdir(parents=True, exist_ok=True)
         raw_bytes = self.serialize_to_bytes(memory_system)
-        target_path.write_bytes(raw_bytes)
+        # Escrita atômica via arquivo temporário para evitar race conditions em multi-threading
+        tmp_target = target_path.with_suffix(f".tmp_{uuid.uuid4().hex[:6]}")
+        tmp_target.write_bytes(raw_bytes)
+        tmp_target.replace(target_path)
         return len(raw_bytes)
 
     def load_binary_file(
@@ -377,9 +380,28 @@ class BinaryMachineMemoryStore:
             }
         with target_path.open("rb") as f:
             header_bytes = f.read(cls.HEADER_SIZE)
-        magic, ts, wm_count, ep_count, node_count, edge_count, cycles_count = struct.unpack(
-            cls.HEADER_STRUCT, header_bytes
-        )
+        if len(header_bytes) < cls.HEADER_SIZE:
+            return {
+                "file_path": str(target_path),
+                "file_exists": True,
+                "file_size_bytes": file_size,
+                "is_valid_binary": False,
+                "magic_header": None,
+                "error": f"Leitura parcial do cabeçalho ({len(header_bytes)} < {cls.HEADER_SIZE}).",
+            }
+        try:
+            magic, ts, wm_count, ep_count, node_count, edge_count, cycles_count = struct.unpack(
+                cls.HEADER_STRUCT, header_bytes
+            )
+        except struct.error as e:
+            return {
+                "file_path": str(target_path),
+                "file_exists": True,
+                "file_size_bytes": file_size,
+                "is_valid_binary": False,
+                "magic_header": None,
+                "error": f"Cabeçalho inválido: {e}",
+            }
         is_valid = (magic == cls.MAGIC_HEADER)
         return {
             "file_path": str(target_path),

@@ -66,7 +66,7 @@ class DevelopmentEngine:
         self.milestones: List[DevelopmentalMilestone] = []
 
         # Subsistemas cognitivos
-        self.neurogenesis = NeurogenesisEngine(d_model=d_model)
+        self.neurogenesis = NeurogenesisEngine(d_model=d_model, storage_dir=self.storage_dir)
         self.memory = MemorySystem(storage_dir=self.storage_dir)
         self.visual_cortex = VisualPerceptionCortex(d_model=d_model)
         self.reading_cortex = ReadingComprehensionCortex(d_model=d_model)

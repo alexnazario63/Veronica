@@ -1369,11 +1369,16 @@
                 <span class="mode-pill-badge">Imersivo</span>
               </button>
             </div>
+            <div style="display:flex;align-items:center;gap:8px;flex-wrap:wrap;">
               <div class="autonomous-learning-indicator" id="autoLearningHeaderPill" onclick="toggleAutonomousLearning()" title="Clique para pausar ou retomar o auto-aprendizado autônomo">
                 <span class="live-pulse-dot" id="autoLearningDot"></span>
                 <span id="autoLearnHeaderLabel">🧠 Auto-Aprendizado: <strong style="color:#10b981;">Ativo</strong></span>
-                <span class="auto-learn-count" id="autoLearnNeuronsCount">0 neurônios novos</span>
+                <span class="auto-learn-count" id="autoLearnNeuronsCount">0 neurônios</span>
               </div>
+              <button class="btn-obs-pill" onclick="openAutoLearnConfigModal()" title="Configurar Workers e Intervalo de Auto-Aprendizado" style="padding:4px 9px;font-size:11px;display:flex;align-items:center;gap:5px;">
+                <i data-lucide="sliders" style="width:13px;height:13px;"></i>
+                <span id="headerWorkersLabel">4 Workers • 2ms</span>
+              </button>
               <div class="mode-info-tag" id="modeInfoTag">
                 <span>💬 <strong>Modo Chat</strong>: Conversação fluida, rápida e inteligente multi-vendor</span>
               </div>
@@ -1611,10 +1616,17 @@
                 <button class="btn-obs-pill" id="btnToggleAutoLearn" onclick="toggleAutonomousLearning()">⏸️ Pausar</button>
                 <button class="btn-obs-pill" onclick="triggerInstantThoughtCycle()">⚡ Pensar Agora</button>
                 <select id="autoLearnIntervalSelect" onchange="changeAutoLearnInterval(this.value)" style="background:var(--bg-input);color:#fff;border:1px solid var(--border);border-radius:6px;font-size:11px;padding:3px 8px;">
-                  <option value="3.0">⚡ Rápido (3s)</option>
-                  <option value="6.0" selected>⚡ Normal (6s)</option>
-                  <option value="15.0">🐢 Calmo (15s)</option>
+                  <option value="0.002">⚡ 2ms (Turbo Extremo)</option>
+                  <option value="0.02">🚀 20ms (Hiper-Rápido)</option>
+                  <option value="0.1">⏱️ 100ms (Rápido)</option>
+                  <option value="0.5" selected>🌱 500ms (Padrão)</option>
+                  <option value="2.0">🌿 2s (Moderado)</option>
+                  <option value="6.0">🐢 6s (Calmo)</option>
                 </select>
+                <button class="btn-obs-pill" onclick="openAutoLearnConfigModal()" title="Configurar Workers e Intervalo" style="display:flex;align-items:center;gap:4px;">
+                  <i data-lucide="sliders" style="width:12px;height:12px;"></i>
+                  <span>Workers: <strong id="devWorkersBadge">4</strong></span>
+                </button>
               </div>
             </div>
 
@@ -1785,6 +1797,67 @@
       <div style="display:flex;justify-content:flex-end;gap:8px;">
         <button class="btn btn-outline" onclick="closeTechnicalFeedbackModal()">Cancelar</button>
         <button class="btn btn-success" onclick="confirmSubmitFeedback()">Salvar Correção & Ensinar Verônica</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- ==================== MODAL DE CONFIGURAÇÃO DE AUTO-APRENDIZADO & MULTI-WORKERS ==================== -->
+  <div id="autoLearnConfigModal" style="display:none;position:fixed;inset:0;background:rgba(2,6,18,0.85);backdrop-filter:blur(12px);z-index:999;place-items:center;padding:16px;">
+    <div class="modal-content-box" style="max-width:540px;border-color:#10b981;">
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:12px;">
+        <strong style="font-size:14px;color:#fff;display:flex;align-items:center;gap:8px;">
+          <span>⚡</span> Multi-Workers de Auto-Aprendizado da Veronica
+        </strong>
+        <button class="btn-msg-action" onclick="closeAutoLearnConfigModal()">✕</button>
+      </div>
+
+      <p style="font-size:12px;color:var(--text-muted);margin-bottom:14px;line-height:1.5;">
+        Configure a quantidade de workers paralelos e a cadência de pensamento contínuo.
+        Suporta intervalos ultrarrápidos de até <strong>2ms</strong> por worker sem travar a interface.
+      </p>
+
+      <div style="background:#040711;border:1px solid var(--border-subtle);border-radius:10px;padding:14px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <label style="font-size:12px;color:#38bdf8;font-weight:700;">Quantidade de Workers Simultâneos:</label>
+          <span style="font-size:14px;font-weight:700;color:#fff;" id="modalWorkersCountDisplay">4</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;">
+          <button class="btn btn-outline" style="width:32px;height:32px;padding:0;font-size:16px;" onclick="adjustWorkers(-1)">-</button>
+          <input type="range" id="modalWorkersSlider" min="1" max="16" value="4" style="flex:1;" oninput="onWorkersSliderChanged(this.value)" />
+          <button class="btn btn-outline" style="width:32px;height:32px;padding:0;font-size:16px;" onclick="adjustWorkers(1)">+</button>
+        </div>
+      </div>
+
+      <div style="background:#040711;border:1px solid var(--border-subtle);border-radius:10px;padding:14px;margin-bottom:12px;">
+        <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:6px;">
+          <label style="font-size:12px;color:#10b981;font-weight:700;">Intervalo por Ciclo de Worker (ms):</label>
+          <span style="font-size:14px;font-weight:700;color:#10b981;" id="modalIntervalMsDisplay">2 ms</span>
+        </div>
+        <div style="display:flex;align-items:center;gap:10px;margin-bottom:10px;">
+          <input type="number" id="modalIntervalMsInput" min="2" max="10000" step="1" value="2" style="width:90px;background:var(--bg-input);border:1px solid var(--border);border-radius:6px;padding:5px 8px;color:#fff;font-weight:700;text-align:center;" oninput="onIntervalInputChanged(this.value)" />
+          <span style="font-size:11px;color:var(--text-muted);">Mínimo suportado: <strong>2ms</strong></span>
+        </div>
+        <div style="display:flex;gap:6px;flex-wrap:wrap;">
+          <button class="btn-obs-pill" style="font-size:10.5px;padding:3px 8px;" onclick="setPresetInterval(2)">⚡ 2ms (Turbo)</button>
+          <button class="btn-obs-pill" style="font-size:10.5px;padding:3px 8px;" onclick="setPresetInterval(20)">🚀 20ms</button>
+          <button class="btn-obs-pill" style="font-size:10.5px;padding:3px 8px;" onclick="setPresetInterval(100)">⏱️ 100ms</button>
+          <button class="btn-obs-pill" style="font-size:10.5px;padding:3px 8px;" onclick="setPresetInterval(500)">🌱 500ms</button>
+          <button class="btn-obs-pill" style="font-size:10.5px;padding:3px 8px;" onclick="setPresetInterval(2000)">🌙 2.0s</button>
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:space-between;align-items:center;margin-bottom:14px;padding:8px 12px;background:rgba(16,185,129,0.08);border:1px solid rgba(16,185,129,0.25);border-radius:8px;">
+        <div style="font-size:11px;color:#cbd5e1;">
+          Taxa estimada: <strong id="modalEstimatedThroughput" style="color:#34d399;">2.000 pensamentos/s</strong>
+        </div>
+        <div style="font-size:10.5px;color:var(--text-muted);" id="modalTotalNeuronsInCircuitBadge">
+          0 neurônios no circuito
+        </div>
+      </div>
+
+      <div style="display:flex;justify-content:flex-end;gap:8px;">
+        <button class="btn btn-outline" onclick="closeAutoLearnConfigModal()">Fechar</button>
+        <button class="btn btn-success" onclick="saveAutoLearnConfig()">Salvar & Ativar Configuração</button>
       </div>
     </div>
   </div>
@@ -3731,16 +3804,20 @@ commit trial 120</textarea>
 
     // ==================== AUTO-APRENDIZADO AUTÔNOMO & NEUROGÊNESE ESPONTÂNEA ====================
     let autoLearningRunning = true;
+    let lastAutoLearnStatus = null;
 
     async function loadAutonomousLearningStatus() {
       try {
         const data = await apiFetch('/api/development/autonomous-learning/status');
         autoLearningRunning = data.is_running;
+        lastAutoLearnStatus = data;
 
         // Atualiza pílula no header do Chat
         const headerDot = document.getElementById('autoLearningDot');
         const headerLabel = document.getElementById('autoLearnHeaderLabel');
         const countBadge = document.getElementById('autoLearnNeuronsCount');
+        const headerWorkersLbl = document.getElementById('headerWorkersLabel');
+        const devWorkersBadge = document.getElementById('devWorkersBadge');
 
         if (headerLabel) {
           headerLabel.innerHTML = `🧠 Auto-Aprendizado: <strong style="color:${data.is_running ? '#10b981' : '#f59e0b'};">${data.is_running ? 'Ativo' : 'Pausado'}</strong>`;
@@ -3752,8 +3829,20 @@ commit trial 120</textarea>
             headerDot.classList.add('paused');
           }
         }
+        if (headerWorkersLbl) {
+          const formattedInterval = data.interval_ms < 1000 ? `${data.interval_ms}ms` : `${(data.interval_seconds).toFixed(1)}s`;
+          headerWorkersLbl.textContent = `${data.workers || 4} Workers • ${formattedInterval}`;
+        }
+        if (devWorkersBadge) {
+          devWorkersBadge.textContent = data.workers || 4;
+        }
+
+        const totalNeurons = (data.total_neurons_in_circuit != null && data.total_neurons_in_circuit > 0)
+          ? data.total_neurons_in_circuit
+          : data.autonomous_neurons_born;
+
         if (countBadge) {
-          countBadge.textContent = `${data.autonomous_neurons_born} neurônios novos`;
+          countBadge.textContent = `${totalNeurons} neurônios`;
         }
 
         // Atualiza Ticker de Pensamento Autônomo
@@ -3788,7 +3877,7 @@ commit trial 120</textarea>
             devStatusBadge.className = 'badge badge-fact';
             devStatusBadge.style.background = 'rgba(16,185,129,0.2)';
             devStatusBadge.style.color = '#34d399';
-            devStatusBadge.textContent = '🟢 ATIVO (Pensando em 2º plano)';
+            devStatusBadge.textContent = `🟢 ATIVO (${data.workers || 4} Workers em Paralelo)`;
           } else {
             devStatusBadge.className = 'badge badge-warn';
             devStatusBadge.style.background = 'rgba(245,158,11,0.2)';
@@ -3806,10 +3895,15 @@ commit trial 120</textarea>
           devCurrentThoughtText.textContent = `"${data.current_thought}"`;
         }
         if (kpiAutoNeurons) {
-          kpiAutoNeurons.textContent = data.autonomous_neurons_born;
+          kpiAutoNeurons.textContent = totalNeurons;
         }
         if (kpiAutoMemories) {
           kpiAutoMemories.textContent = data.autonomous_memories_created;
+        }
+
+        const modalNeuronsBadge = document.getElementById('modalTotalNeuronsInCircuitBadge');
+        if (modalNeuronsBadge) {
+          modalNeuronsBadge.textContent = `${totalNeurons} neurônios no circuito`;
         }
 
         // Atualiza lista recente de pensamentos
@@ -3818,7 +3912,7 @@ commit trial 120</textarea>
           streamList.innerHTML = (data.recent_thoughts || []).slice().reverse().map(t => `
             <div style="background:#030712;padding:6px 10px;border-radius:6px;border:1px solid var(--border-subtle);font-size:11px;">
               <div style="display:flex;justify-content:space-between;color:var(--text-muted);font-size:10px;margin-bottom:2px;">
-                <span style="color:#38bdf8;font-weight:700;">#${t.cycle} • ${t.domain || 'Conhecimento'}</span>
+                <span style="color:#38bdf8;font-weight:700;">#${t.cycle} • Worker ${t.worker_id || 1} • ${t.domain || 'Conhecimento'}</span>
                 <span>${(t.timestamp || '').slice(11, 19)}</span>
               </div>
               <div style="color:#e2e8f0;">${t.insight || t.concept}</div>
@@ -3837,6 +3931,87 @@ commit trial 120</textarea>
         }
       } catch (err) {
         console.warn('Erro ao atualizar telemetria de auto-aprendizado:', err);
+      }
+    }
+
+    // Modal de Opções de Multi-Workers & Velocidade (até 2ms)
+    function openAutoLearnConfigModal() {
+      const modal = document.getElementById('autoLearnConfigModal');
+      if (modal) {
+        modal.style.display = 'grid';
+        if (lastAutoLearnStatus) {
+          const w = lastAutoLearnStatus.workers || 4;
+          const ms = lastAutoLearnStatus.interval_ms || 2;
+          const slider = document.getElementById('modalWorkersSlider');
+          const countDisp = document.getElementById('modalWorkersCountDisplay');
+          const inputMs = document.getElementById('modalIntervalMsInput');
+          const dispMs = document.getElementById('modalIntervalMsDisplay');
+
+          if (slider) slider.value = w;
+          if (countDisp) countDisp.textContent = w;
+          if (inputMs) inputMs.value = ms;
+          if (dispMs) dispMs.textContent = `${ms} ms`;
+          updateEstimatedThroughput();
+        }
+      }
+      refreshLucideIcons();
+    }
+
+    function closeAutoLearnConfigModal() {
+      const modal = document.getElementById('autoLearnConfigModal');
+      if (modal) modal.style.display = 'none';
+    }
+
+    function adjustWorkers(delta) {
+      const slider = document.getElementById('modalWorkersSlider');
+      if (!slider) return;
+      let val = (parseInt(slider.value) || 4) + delta;
+      val = Math.max(1, Math.min(32, val));
+      slider.value = val;
+      onWorkersSliderChanged(val);
+    }
+
+    function onWorkersSliderChanged(val) {
+      const disp = document.getElementById('modalWorkersCountDisplay');
+      if (disp) disp.textContent = val;
+      updateEstimatedThroughput();
+    }
+
+    function onIntervalInputChanged(val) {
+      const ms = Math.max(2, parseFloat(val) || 2);
+      const disp = document.getElementById('modalIntervalMsDisplay');
+      if (disp) disp.textContent = `${ms} ms`;
+      updateEstimatedThroughput();
+    }
+
+    function setPresetInterval(ms) {
+      const input = document.getElementById('modalIntervalMsInput');
+      if (input) input.value = ms;
+      onIntervalInputChanged(ms);
+    }
+
+    function updateEstimatedThroughput() {
+      const w = parseInt(document.getElementById('modalWorkersSlider')?.value || '4');
+      const ms = Math.max(2, parseFloat(document.getElementById('modalIntervalMsInput')?.value || '2'));
+      const tps = Math.round((1000 / ms) * w);
+      const el = document.getElementById('modalEstimatedThroughput');
+      if (el) el.textContent = `~${tps.toLocaleString('pt-BR')} pensamentos/s`;
+    }
+
+    async function saveAutoLearnConfig() {
+      const workers = parseInt(document.getElementById('modalWorkersSlider')?.value || '4');
+      const interval_ms = Math.max(2, parseFloat(document.getElementById('modalIntervalMsInput')?.value || '2'));
+
+      try {
+        await apiFetch('/api/development/autonomous-learning/config', {
+          method: 'POST',
+          body: JSON.stringify({ workers, interval_ms })
+        });
+        showToast(`Auto-aprendizado configurado: ${workers} workers a ${interval_ms}ms!`, 'success');
+        closeAutoLearnConfigModal();
+        await loadAutonomousLearningStatus();
+      } catch (err) {
+        showToast('Erro ao configurar: ' + err.message, 'error');
       }
     }
 
@@ -3862,7 +4037,7 @@ commit trial 120</textarea>
 
     async function changeAutoLearnInterval(val) {
       try {
-        const sec = parseFloat(val);
+        const sec = Math.max(0.002, parseFloat(val));
         await apiFetch('/api/development/autonomous-learning/interval', {
           method: 'POST',
           body: JSON.stringify({ interval_seconds: sec })

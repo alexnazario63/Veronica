@@ -536,3 +536,90 @@ def test_autonomous_learning_daemon_background_neurogenesis_and_memory_without_d
         assert dev_status["autonomous_learning"]["is_running"] is True
         assert dev_status["total_born_neurons"] > initial_neurons
 
+
+def test_multi_worker_autonomous_learning_2ms_interval_and_neuron_persistence():
+    """
+    Valida:
+    1. Multi-workers no daemon de aprendizado autônomo (ex: 4 workers paralelos).
+    2. Suporte a cadência ultra-rápida de até 2ms (0.002s / interval_ms=2.0).
+    3. Persistência permanente dos neurônios criados: ao parar o motor ou recarregar
+       o backend, nenhum neurônio é perdido (salvos em veronica_neurogenesis_circuit.json).
+    4. Validação de limites (rejeição de intervalo < 2ms ou workers < 1 ou > 64).
+    """
+    with tempfile.TemporaryDirectory(ignore_cleanup_errors=True) as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        app = create_app(data_dir=tmp_path)
+        client = TestClient(app)
+
+        # 1. Configura multi-workers (4 workers) e intervalo ultra-rápido de 2ms
+        config_resp = client.post(
+            "/api/development/autonomous-learning/config",
+            json={"workers": 4, "interval_ms": 2.0},
+        )
+        assert config_resp.status_code == 200
+        cfg_data = config_resp.json()
+        assert cfg_data["workers"] == 4
+        assert cfg_data["interval_ms"] == 2.0
+        assert cfg_data["interval_seconds"] == 0.002
+
+        # 2. Executa ciclos de geração de neurônios
+        c1 = client.post("/api/development/autonomous-learning/cycle").json()
+        c2 = client.post("/api/development/autonomous-learning/cycle").json()
+        c3 = client.post("/api/development/autonomous-learning/cycle").json()
+
+        st_active = client.get("/api/development/autonomous-learning/status").json()
+        total_neurons = st_active["total_neurons_in_circuit"]
+        assert total_neurons >= 3
+        assert st_active["workers"] == 4
+        assert st_active["interval_ms"] == 2.0
+
+        # 3. Para o motor cognitivo: Os neurônios NÃO PODEM sumir!
+        stop_resp = client.post("/api/development/autonomous-learning/stop").json()
+        assert stop_resp["is_running"] is False
+
+        # Status após parada: neurônios continuam existindo e não são zerados
+        st_stopped = client.get("/api/development/autonomous-learning/status").json()
+        assert st_stopped["is_running"] is False
+        neurons_when_stopped = st_stopped["total_neurons_in_circuit"]
+        assert neurons_when_stopped >= total_neurons
+        assert st_stopped["autonomous_neurons_born"] >= 3
+
+        # Verificação de estabilidade: com o motor parado, a contagem não se altera
+        st_stopped_2 = client.get("/api/development/autonomous-learning/status").json()
+        assert st_stopped_2["total_neurons_in_circuit"] == neurons_when_stopped
+
+        # 4. Verifica persistência no arquivo JSON no disco
+        circuit_file = tmp_path / "veronica_neurogenesis_circuit.json"
+        assert circuit_file.exists()
+        assert circuit_file.stat().st_size > 50
+
+        # 5. Simula reinício completo do backend/DevelopmentEngine com o mesmo diretório
+        reloaded_engine = DevelopmentEngine(d_model=48, storage_dir=tmp_path)
+        assert len(reloaded_engine.neurogenesis.circuit.neurons) == neurons_when_stopped
+
+        # Valida propriedades dos neurônios restaurados
+        first_neuron = reloaded_engine.neurogenesis.circuit.neurons[0]
+        assert hasattr(first_neuron, "neuron_id")
+        assert first_neuron.neuron_id.startswith("NEURON-")
+        assert first_neuron.trigger_concept is not None
+
+        # 6. Validação de limites (intervalo mínimo 2ms / 0.002s e workers 1..64)
+        bad_interval = client.post(
+            "/api/development/autonomous-learning/interval",
+            json={"interval_ms": 1.0},  # Menor que 2ms deve falhar
+        )
+        assert bad_interval.status_code == 422
+
+        bad_workers = client.post(
+            "/api/development/autonomous-learning/config",
+            json={"workers": 0},  # Menor que 1 deve falhar
+        )
+        assert bad_workers.status_code == 422
+
+        bad_workers_max = client.post(
+            "/api/development/autonomous-learning/config",
+            json={"workers": 100},  # Maior que 64 deve falhar
+        )
+        assert bad_workers_max.status_code == 422
+
+

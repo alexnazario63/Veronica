@@ -155,7 +155,9 @@ class ReadTextRequest(BaseModel):
 
 
 class AutonomousIntervalRequest(BaseModel):
-    interval_seconds: float = Field(default=5.0, ge=0.1, le=3600.0)
+    interval_seconds: Optional[float] = Field(default=None, ge=0.002, le=3600.0)
+    interval_ms: Optional[float] = Field(default=None, ge=2.0, le=3600000.0)
+    workers: Optional[int] = Field(default=None, ge=1, le=64)
 
 
 def create_app(data_dir: Optional[Path] = None) -> FastAPI:
@@ -855,10 +857,14 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         )
 
     @app.post("/api/development/autonomous-learning/interval")
+    @app.post("/api/development/autonomous-learning/config")
     def set_autonomous_learning_interval(req: AutonomousIntervalRequest) -> Dict[str, Any]:
         def _set():
-            hub.autonomous_learning.interval_seconds = req.interval_seconds
-            return hub.autonomous_learning.get_status()
+            return hub.autonomous_learning.set_config(
+                workers=req.workers,
+                interval_seconds=req.interval_seconds,
+                interval_ms=req.interval_ms,
+            )
         return _handle_domain_errors(_set)
 
     # ==================== 8. Servir Interface Gráfica Web (GUI / Vite) ====================

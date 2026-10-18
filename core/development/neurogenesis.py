@@ -10,10 +10,15 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
+import json
+import logging
 import math
+from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
 import numpy as np
+
+logger = logging.getLogger("VeronicaNeurogenesis")
 
 from core.neural.layers import Module, Neuron, Parameter
 from core.neural.tensor import Tensor
@@ -165,6 +170,61 @@ class DynamicNeuron(Neuron):
             "weight_out_norm": round(float(np.linalg.norm(w_out_flat)), 4),
         }
 
+    def to_dict(self) -> Dict[str, Any]:
+        """Serializa o neurônio para persistência em disco."""
+        w_in = self.weight.data.tolist()
+        w_out = self.outgoing_weights.data.tolist()
+        return {
+            "neuron_id": self.neuron_id,
+            "birth_timestamp": self.birth_timestamp,
+            "trigger_type": self.trigger_type,
+            "trigger_concept": self.trigger_concept,
+            "developmental_stage": self.developmental_stage,
+            "activation_fn": self.activation_name,
+            "firing_count": self.firing_count,
+            "synaptic_strength": float(self.synaptic_strength),
+            "myelination_score": float(self.myelination_score),
+            "coords_3d": list(self.coords_3d),
+            "last_activated_at": self.last_activated_at,
+            "co_activated_concepts": list(self.co_activated_concepts),
+            "weight_in": w_in,
+            "weight_out": w_out,
+            "in_features": self.in_features,
+            "out_features": self.out_features,
+        }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any]) -> DynamicNeuron:
+        """Restaura um neurônio a partir de dados serializados."""
+        in_feat = data.get("in_features", 48)
+        out_feat = data.get("out_features", 48)
+        coords = tuple(data["coords_3d"]) if "coords_3d" in data else None
+        neuron = cls(
+            in_features=in_feat,
+            out_features=out_feat,
+            trigger_concept=data.get("trigger_concept", "Concept"),
+            trigger_type=data.get("trigger_type", "COGNITIVE_EXPERIENCE"),
+            activation=data.get("activation_fn", "gelu"),
+            coords_3d=coords,
+        )
+        neuron.neuron_id = data.get("neuron_id", neuron.neuron_id)
+        neuron.birth_timestamp = data.get("birth_timestamp", neuron.birth_timestamp)
+        neuron.developmental_stage = data.get("developmental_stage", "NEONATAL")
+        neuron.firing_count = int(data.get("firing_count", 0))
+        neuron.synaptic_strength = float(data.get("synaptic_strength", 1.0))
+        neuron.myelination_score = float(data.get("myelination_score", 0.15))
+        neuron.last_activated_at = data.get("last_activated_at")
+        neuron.co_activated_concepts = list(data.get("co_activated_concepts", []))
+        if "weight_in" in data:
+            arr_in = np.array(data["weight_in"], dtype=np.float64)
+            if arr_in.shape == neuron.weight.data.shape:
+                neuron.weight.data[...] = arr_in
+        if "weight_out" in data:
+            arr_out = np.array(data["weight_out"], dtype=np.float64)
+            if arr_out.shape == neuron.outgoing_weights.data.shape:
+                neuron.outgoing_weights.data[...] = arr_out
+        return neuron
+
 
 class NeurogenesisCircuit(Module):
     """
@@ -292,6 +352,41 @@ class NeurogenesisCircuit(Module):
             "synaptic_edges": synaptic_edges,
         }
 
+    def save_to_file(self, filepath: Path | str) -> None:
+        """Salva todo o circuito de neurônios nascidos em disco de forma persistente."""
+        p = Path(filepath)
+        p.parent.mkdir(parents=True, exist_ok=True)
+        payload = {
+            "d_model": self.d_model,
+            "seed": self.seed,
+            "saved_at": datetime.now(timezone.utc).isoformat(),
+            "neurons": [n.to_dict() for n in self.neurons],
+        }
+        with open(p, "w", encoding="utf-8") as f:
+            json.dump(payload, f, ensure_ascii=False, indent=2)
+
+    def load_from_file(self, filepath: Path | str) -> int:
+        """Carrega e restaura todos os neurônios previamente concebidos a partir do disco."""
+        p = Path(filepath)
+        if not p.exists():
+            return 0
+        try:
+            with open(p, "r", encoding="utf-8") as f:
+                data = json.load(f)
+            loaded = 0
+            self.neurons.clear()
+            self._neuron_lookup.clear()
+            for nd in data.get("neurons", []):
+                neuron = DynamicNeuron.from_dict(nd)
+                self.neurons.append(neuron)
+                self._neuron_lookup[neuron.neuron_id] = neuron
+                loaded += 1
+            logger.info(f"Circuito de neurogênese restaurado: {loaded} neurônios carregados do disco.")
+            return loaded
+        except Exception as exc:
+            logger.warning(f"Erro ao carregar circuito de neurogênese de {filepath}: {exc}")
+            return 0
+
 
 class NeurogenesisEngine:
     """
@@ -299,12 +394,37 @@ class NeurogenesisEngine:
     - Avalia necessidade de criação de neurônios perante novos estímulos
     - Aloca e conecta neurônios
     - Mantém a plasticidade e conservação da rede
+    - Persiste todos os neurônios nascidos em disco para que nunca sumam
     """
 
-    def __init__(self, circuit: Optional[NeurogenesisCircuit] = None, d_model: int = 48) -> None:
+    def __init__(
+        self,
+        circuit: Optional[NeurogenesisCircuit] = None,
+        d_model: int = 48,
+        storage_dir: Optional[Path | str] = None,
+    ) -> None:
         self.circuit = circuit if circuit is not None else NeurogenesisCircuit(d_model=d_model)
         self.novelty_threshold: float = 0.45
         self.birth_history: List[Dict[str, Any]] = []
+        self.storage_dir = Path(storage_dir) if storage_dir else None
+        self._circuit_file = (self.storage_dir / "veronica_neurogenesis_circuit.json") if self.storage_dir else None
+
+        if self._circuit_file and self._circuit_file.exists():
+            self.load_circuit()
+
+    def save_circuit(self) -> None:
+        """Persiste imediatamente o circuito neural em arquivo físico."""
+        if self._circuit_file:
+            try:
+                self.circuit.save_to_file(self._circuit_file)
+            except Exception as exc:
+                logger.warning(f"Falha ao salvar circuito de neurogênese: {exc}")
+
+    def load_circuit(self) -> int:
+        """Carrega o circuito salvo do disco."""
+        if self._circuit_file and self._circuit_file.exists():
+            return self.circuit.load_from_file(self._circuit_file)
+        return 0
 
     def trigger_neurogenesis_for_concept(
         self,
@@ -336,6 +456,7 @@ class NeurogenesisEngine:
                 "details": details or {},
             }
             self.birth_history.append(log_entry)
+        self.save_circuit()
         return born
 
     def export_summary(self) -> Dict[str, Any]:
