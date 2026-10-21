@@ -64,26 +64,31 @@ from safety import (
 )
 
 
-_PROTOCOL_ALIASES = {
-    "ospf": ("open shortest path first",),
-    "bgp": ("border gateway protocol",),
-    "mpls": ("multiprotocol label switching",),
-    "rip": ("routing information protocol",),
-    "eigrp": ("enhanced interior gateway routing protocol",),
-    "isis": ("intermediate system to intermediate system",),
-    "isisv6": ("intermediate system to intermediate system",),
+_FOCUS_STOP_WORDS = {
+    "quando", "where", "what", "qual", "quais", "quem", "como", "porque", "por", "que",
+    "foi", "era", "sao", "ser", "tem", "the", "was", "were", "did", "does", "are", "is", "do", "how", "who", "why",
+    "inventado", "inventada", "inventados", "inventadas", "invented", "criado", "criada", "created", "developed", "desenvolvido", "desenvolvida", "surgiu", "origem",
+    "protocolo", "protocol", "sistema", "system", "assunto", "subject", "tema", "topic", "contexto", "context",
+    "refiro", "referindo", "referring", "refer", "mean", "meant", "quero", "quis", "dizer", "say", "said", "falo", "falando", "talking",
+    "somente", "apenas", "only", "just", "especificamente", "specifically", "exclusivamente", "exclusively", "sobre", "about",
+    "please", "explique", "explaining", "explain", "tell", "fale", "mostre", "show", "me", "minha", "meu",
+    "eu", "i", "ao", "aos", "da", "das", "de", "do", "dos", "e", "em", "na", "nas", "no", "nos", "a", "o", "os",
+    "um", "uma", "uns", "umas", "the", "a", "an", "and", "or", "to", "of", "in", "on", "at", "for", "is", "it",
+    "this", "that", "only", "just", "please", "tell", "about", "me",
 }
 
 
-def _matches_protocol_anchor(text: str, protocols: set[str]) -> bool:
-    text_terms = open_domain_terms(text)
-    for protocol in protocols:
-        if protocol in text_terms:
-            return True
-        for alias in _PROTOCOL_ALIASES.get(protocol, ()):
-            if set(open_domain_terms(alias)).issubset(text_terms):
-                return True
-    return False
+def _focus_terms(text: str) -> set[str]:
+    """Keep the topic-bearing words while dropping question and clarification scaffolding."""
+    return open_domain_terms(text) - _FOCUS_STOP_WORDS
+
+
+def _matches_focus(text: str, focus: set[str]) -> bool:
+    if not focus:
+        return True
+    matched = _focus_terms(text) & focus
+    required = 1 if len(focus) == 1 else max(2, (len(focus) * 2 + 2) // 3)
+    return len(matched) >= required
 
 
 class ConversationService:
@@ -584,38 +589,19 @@ class ChatService:
         last_user_query = user_msgs[-1]["content"] if user_msgs else ""
         last_asst_content = asst_msgs[-1]["content"] if asst_msgs else ""
 
-        # Identifica tópicos recentes discutidos no histórico
-        all_text = " ".join([m.get("content", "") for m in prior_msgs[-6:]]).lower()
-        recent_topics: List[str] = []
-        if "ospf" in all_text:
-            recent_topics.append("OSPF")
-        if "bgp" in all_text:
-            recent_topics.append("BGP")
-        if "mpls" in all_text or "srv6" in all_text:
-            recent_topics.append("MPLS_SRv6")
-        if "ne40" in all_text or "vrp" in all_text:
-            recent_topics.append("HUAWEI_NE40E")
-        if "ccr2004" in all_text or "mikrotik" in all_text:
-            recent_topics.append("MIKROTIK_ROUTEROS")
-        if "juniper" in all_text or "junos" in all_text or "mx204" in all_text:
-            recent_topics.append("JUNIPER_JUNOS")
-        if "cisco" in all_text or "ios-xr" in all_text or "asr" in all_text:
-            recent_topics.append("CISCO_IOSXR")
-        if "telemetria" in all_text or "gnmi" in all_text or "netconf" in all_text:
-            recent_topics.append("TELEMETRY")
-        if any(w in all_text for w in ["que dia", "hoje", "data de hoje", "outubro"]):
-            recent_topics.append("CURRENT_DATE")
+        # Keep general topic terms from the recent dialogue, regardless of domain.
+        recent_topics = sorted(_focus_terms(last_user_query))[:16]
 
-        # Verifica se a mensagem atual faz referência anafórica a algo anterior ("isso", "nessa data", etc.)
+        # Detect generic clarifications and references to prior turns in any domain.
         low_curr = current_msg.lower()
         is_followup = any(re.search(p, low_curr) for p in [
-            r"\b(e (quais|qual|como|onde|por que))\b",
-            r"\b(nessa data|neste dia|nessa época|nesses eventos)\b",
-            r"\b(integrar isso|fazer isso|usar isso|aplicar isso|com isso|sobre isso)\b",
-            r"\b(e no (cisco|huawei|juniper|mikrotik))\b",
-            r"\b(e o (bgp|ospf|mpls))\b",
-            r"\b(me refiro|refiro-me|quero dizer|quis dizer|estou falando|falo de)\b",
+            r"\b(e (quais|qual|como|onde|quando|por que|por quanto))\b",
+            r"\b(nessa|nesse|naquela|naquele|dessa|desse|dela|dele|isso|isto|aquilo)\b",
+            r"\b(com|sobre|a respeito de) (isso|isto|aquilo|ele|ela|eles|elas)\b",
+            r"\b(me refiro|refiro-me|quero dizer|quis dizer|queria dizer|estou falando|falo de|estou me referindo)\b",
+            r"\b(na verdade|mais especificamente|para esclarecer|corrigindo|não,|nao,)\b",
             r"\b(apenas|somente|exclusivamente)\b",
+            r"\b(e (ele|ela|eles|elas|esse|essa|esses|essas|este|esta|estes|estas))\b",
         ])
 
         return {
@@ -1624,23 +1610,20 @@ class ChatService:
 
         # 7. Pesquisa e explicacao aberta: recuperar evidencias do dominio da pergunta.
         if intent == "EXPLANATION":
-            stop_words = {"qual", "quais", "como", "quando", "onde", "porque", "por", "para", "uma", "uns", "umas", "the", "and", "what", "when", "where", "why", "with", "from"}
             search_query = message_text
             if conv_context.get("is_followup") and conv_context.get("last_user_query"):
                 search_query = f"{conv_context['last_user_query']} {message_text}"
 
             rag_res = self.rag.search(search_query, top_k=4)
             local_results = rag_res.get("results", [])
-            protocol_terms = open_domain_terms(search_query) & {"ospf", "bgp", "mpls", "rip", "eigrp", "isis", "isisv6"}
+            is_followup = bool(conv_context.get("is_followup"))
+            focus_terms = _focus_terms(message_text) if is_followup else set()
             local_candidates = [
                 item for item in local_results
                 if float(item.get("query_coverage", 0.0)) >= 0.35
-                and (
-                    not protocol_terms
-                    or _matches_protocol_anchor(
-                        f"{item.get('document', {}).get('title', '')} {item.get('document', {}).get('feature', '')}",
-                        protocol_terms,
-                    )
+                and _matches_focus(
+                    f"{item.get('document', {}).get('title', '')} {item.get('document', {}).get('feature', '')} {item.get('document', {}).get('content', '')}",
+                    focus_terms,
                 )
             ]
             research_bundle: Dict[str, Any] = {}
@@ -1648,7 +1631,11 @@ class ChatService:
             web_synthesis: Dict[str, Any] = {}
             if self.hub and hasattr(self.hub, "research_open_domain"):
                 try:
-                    research_bundle = self.hub.research_open_domain(search_query, max_results=7)
+                    research_bundle = self.hub.research_open_domain(
+                        search_query,
+                        max_results=7,
+                        focus_query=message_text if is_followup else None,
+                    )
                     web_results = research_bundle.get("sources", [])
                     web_synthesis = research_bundle.get("synthesis", {})
                 except Exception:
@@ -2587,14 +2574,24 @@ class VeronicaPlatformHub:
                     return {"thought": "", "tool_calls": [], "answer": "Olá! Como posso ajudar?"}
                 try:
                     research_query = user_message
-                    clarification = re.search(r"\b(me refiro|refiro-me|quis dizer|quero dizer|somente|apenas|exclusivamente)\b", user_message, re.I)
+                    clarification = re.search(
+                        r"\b(me refiro|refiro-me|quis dizer|queria dizer|quero dizer|estou falando|falo de|"
+                        r"mais especificamente|na verdade|para esclarecer|corrigindo|somente|apenas|exclusivamente)\b",
+                        user_message,
+                        re.I,
+                    )
                     previous_user = next((
                         str(item.get("content", "")) for item in reversed(history[:-1])
                         if item.get("role") == "user" and item.get("content")
                     ), "")
                     if clarification and previous_user:
                         research_query = f"{previous_user} {user_message}"
-                    research = await asyncio.to_thread(self.research_open_domain, research_query, 5)
+                    research = await asyncio.to_thread(
+                        self.research_open_domain,
+                        research_query,
+                        5,
+                        user_message if clarification and previous_user else None,
+                    )
                     synthesis = research.get("synthesis", {})
                     answer = str(synthesis.get("answer", "")).strip()
                     if answer and not is_degenerate(answer):
@@ -2795,7 +2792,9 @@ class VeronicaPlatformHub:
             if neurons:
                 neurons[0].coords_3d = coords
 
-    def research_open_domain(self, query: str, max_results: int = 7) -> Dict[str, Any]:
+    def research_open_domain(
+        self, query: str, max_results: int = 7, focus_query: Optional[str] = None
+    ) -> Dict[str, Any]:
         """Search, fetch, sanitize, rank, synthesize, persist, and measure evidence."""
         from urllib.parse import urlparse
         import hashlib
@@ -2805,7 +2804,7 @@ class VeronicaPlatformHub:
         domain = classify_domain(query)
         raw_results = search_live_web_and_rfc(query, max_results=max_results, timeout=3.5)
         query_terms = open_domain_terms(query)
-        explicit_protocols = query_terms & {"ospf", "bgp", "mpls", "rip", "eigrp", "isis", "isisv6"}
+        focus_terms = _focus_terms(focus_query) if focus_query is not None else set()
         normalized: List[Dict[str, Any]] = []
         for result in raw_results:
             url = str(result.get("url", "")).strip()
@@ -2823,9 +2822,9 @@ class VeronicaPlatformHub:
                 "authority_score": trust["authority_score"], "relevance": round(overlap, 3),
                 "retrieval_score": round(overlap * 0.72 + float(trust["authority_score"]) * 0.28, 4),
             })
-            result["_protocol_match"] = not explicit_protocols or _matches_protocol_anchor(title, explicit_protocols)
+            result["_focus_match"] = _matches_focus(f"{title} {snippet}", focus_terms)
             normalized.append(result)
-        normalized.sort(key=lambda item: (item["_protocol_match"], item["retrieval_score"], item["relevance"]), reverse=True)
+        normalized.sort(key=lambda item: (item["_focus_match"], item["retrieval_score"], item["relevance"]), reverse=True)
 
         cached_by_url = {
             doc.source_uri: doc for doc in self.rag.documents.values()
@@ -2853,17 +2852,16 @@ class VeronicaPlatformHub:
             if fetched.get("url"):
                 item["url"] = str(fetched["url"])
 
-        if explicit_protocols:
-            normalized = [
-                item for item in normalized
-                if _matches_protocol_anchor(item["title"], explicit_protocols)
-            ]
+        normalized = [
+            item for item in normalized
+            if _matches_focus(f"{item['title']} {item['content'][:12000]}", focus_terms)
+        ]
 
         for item in normalized:
             overlap = len(query_terms & open_domain_terms(f"{item['title']} {item['content'][:12000]}")) / max(1, len(query_terms))
             item["relevance"] = round(overlap, 3)
             item["retrieval_score"] = round(overlap * 0.68 + float(item["authority_score"]) * 0.22 + (0.10 if item["full_page"] else 0.0), 4)
-        normalized.sort(key=lambda item: (item.get("_protocol_match", True), item["retrieval_score"], item["relevance"]), reverse=True)
+        normalized.sort(key=lambda item: (item.get("_focus_match", True), item["retrieval_score"], item["relevance"]), reverse=True)
         normalized = normalized[:max_results]
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
