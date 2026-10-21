@@ -25,6 +25,7 @@ import re
 import sqlite3
 import threading
 import tempfile
+import unicodedata
 import wave
 from typing import Any, Dict, Iterator, List, Optional
 import uuid
@@ -65,7 +66,7 @@ from safety import (
 
 
 _FOCUS_STOP_WORDS = {
-    "quando", "where", "what", "qual", "quais", "quem", "como", "porque", "por", "que",
+    "quando", "where", "what", "qual", "quais", "quem", "como", "porque", "por", "que", "ano", "year",
     "foi", "era", "sao", "ser", "tem", "the", "was", "were", "did", "does", "are", "is", "do", "how", "who", "why",
     "inventado", "inventada", "inventados", "inventadas", "invented", "criado", "criada", "created", "developed", "desenvolvido", "desenvolvida", "surgiu", "origem",
     "protocolo", "protocol", "sistema", "system", "assunto", "subject", "tema", "topic", "contexto", "context",
@@ -592,24 +593,11 @@ class ChatService:
         # Keep general topic terms from the recent dialogue, regardless of domain.
         recent_topics = sorted(_focus_terms(last_user_query))[:16]
 
-        # Detect generic clarifications and references to prior turns in any domain.
-        low_curr = current_msg.lower()
-        is_followup = any(re.search(p, low_curr) for p in [
-            r"\b(e (quais|qual|como|onde|quando|por que|por quanto))\b",
-            r"\b(nessa|nesse|naquela|naquele|dessa|desse|dela|dele|isso|isto|aquilo)\b",
-            r"\b(com|sobre|a respeito de) (isso|isto|aquilo|ele|ela|eles|elas)\b",
-            r"\b(me refiro|refiro-me|quero dizer|quis dizer|queria dizer|estou falando|falo de|estou me referindo)\b",
-            r"\b(na verdade|mais especificamente|para esclarecer|corrigindo|não,|nao,)\b",
-            r"\b(apenas|somente|exclusivamente)\b",
-            r"\b(e (ele|ela|eles|elas|esse|essa|esses|essas|este|esta|estes|estas))\b",
-        ])
-
         return {
             "turn_count": len(prior_msgs),
             "last_user_query": last_user_query,
             "last_asst_content": last_asst_content,
             "recent_topics": recent_topics,
-            "is_followup": is_followup,
             "prior_messages": prior_msgs,
         }
 
@@ -711,21 +699,12 @@ class ChatService:
     ) -> str:
         if target_devices and len(target_devices) > 0:
             return "DIAGNOSTIC"
-        low = text.lower().strip()
+        low = "".join(
+            char for char in unicodedata.normalize("NFKD", text.lower().strip())
+            if not unicodedata.combining(char)
+        )
 
         # 1. Perguntas de Eventos Históricos / Fatos do Dia (ou follow-up da data)
-        history_patterns = [
-            r"\b(eventos?|fatos?|acontecimentos?|marcos?|efem[eé]rides?).*(hoje|nesta data|nessa data|na data|hist[oó]ria|hist[oó]rico|ocorreram|ocorrerao|aconteceu)\b",
-            r"\b(o que aconteceu|o que houve|o que se passou).*(hoje|nesta data|nessa data|na data|\d{1,2} de)\b",
-            r"\b(eventos que ocorrera(m|o)|fatos hist[oó]ricos|acontecimentos hist[oó]ricos|efem[eé]rides)\b",
-            r"\b(aconteceu em \d{1,2} de [a-z]+|marcos hist[oó]ricos)\b",
-        ]
-        if any(re.search(p, low) for p in history_patterns):
-            return "HISTORICAL_EVENTS"
-        if any(w in low for w in ["eventos", "aconteceu", "fatos", "ocorreram", "marcos", "efemerides", "historico", "historia"]):
-            return "HISTORICAL_EVENTS"
-
-        # 2. Perguntas de Data e Horário em Tempo Real
         time_patterns = [
             r"\b(que dia [eé] hoje|qual [eé] a data de hoje|qual [eé] o dia de hoje|que dia da semana|data de hoje|data atual|dia atual)\b",
             r"\b(que horas s[aã]o|qual [eé] a hora|hor[aá]rio atual|horas agora|hora certa)\b",
@@ -734,15 +713,6 @@ class ChatService:
             return "TIME_QUERY"
 
         # 3. Solicitação de Integração de Sistemas / Código Feito por Veronica
-        integration_patterns = [
-            r"\b(como fa[cç]o para integrar|como integrar|como posso integrar|integrar a um sistema|integrar isso)\b",
-            r"\b(crie um c[oó]digo para|crie um script para|exemplo de c[oó]digo|como automatizar isso)\b",
-            r"\b(integrar com (prometheus|zabbix|grafana|fastapi|python|api|sistema|webhook))\b",
-        ]
-        if any(re.search(p, low) for p in integration_patterns):
-            return "INTEGRATION_REQUEST"
-
-        # 3.5. Solicitação de Geração de Imagem / Desenho de Topologia
         image_gen_patterns = [
             r"\b(ger[ea]|criar?|desenh[ea]|mostrar?|fa[cç]a|elabore).*(imagem|desenho|diagrama visual|ilustra[cç][aã]o|topologia visual|esquema visual)\b",
             r"\b(gerar imagens?|desenhar|imagem da rede|imagem do ospf|imagem do bgp|imagem de roteadores)\b",
@@ -762,46 +732,23 @@ class ChatService:
             return "GREETING"
 
         # 5. Status da Rede
-        status_patterns = [
-            r"\b(status da rede|invent[aá]rio|quais equipamentos|quais roteadores|topologia|sa[uú]de da rede)\b",
-            r"\b(quantos equipamentos|equipamentos ativos|mostrar topologia|vis[aã]o geral da rede)\b",
-        ]
-        if any(re.search(p, low) for p in status_patterns):
+        if re.search(r"\b(status da rede|inventario da rede|quais equipamentos ativos|quais roteadores|topologia da rede|mostrar topologia|saude da rede|visao geral da rede)\b", low):
             return "NETWORK_STATUS"
 
-        # 6. Desenvolvimento Cognitivo & Memórias
-        dev_patterns = [
-            r"\b(desenvolv|cresc|evolu|idade cognit|maturidade|quantos neur[oô]nios|neur[oô]nios novos|neur[oô]nios pr[oó]prios)\b",
-            r"\b(mem[oó]ria|mem[oó]rias|lembran[cç]a|voc[eê] se lembra|o que voc[eê] aprendeu|o que voc[eê] viu|o que voc[eê] leu)\b",
-            r"\b(dormir|repous|sonho|sono|consolid|reflex[aã]o|auto-reflex[aã]o|introspec)\b",
-            r"\b(humano que ve le aprende|criar neuronios|criando neuronios|criar memorias|criando memorias|crescer continua se desenvolvendo)\b",
-        ]
-        if any(re.search(p, low) for p in dev_patterns):
+        if re.search(r"\b(minhas memorias|sua memoria|memoria binaria|memorias da veronica|seus neuronios|desenvolvimento cognitivo da veronica|o que voce lembra de mim)\b", low):
             return "DEVELOPMENT"
 
-        # 7. Diagnóstico de Incidentes Operacionais
         diag_patterns = [
             r"\b(diagnost|investig|problema|falha|queda|alarme|anomalia|stuck|exstart|presa|preso|down|inativ)\b",
             r"\b(ne8000-core|asr9k-core|mx204-edge|c9500-dist|sr7750-pe|ccr2004-bng)\b",
         ]
-        if any(re.search(p, low) for p in diag_patterns) and not re.search(r"^(qual|quais|o que sabe|explique|como integrar)\b", low):
+        network_scope = re.search(r"\b(bgp|ospf|mpls|roteador|router|switch|interface|vlan|roteamento|netengine|ne40e|ios-xr|junos)\b", low)
+        operational_action = any(re.search(p, low) for p in diag_patterns)
+        if network_scope and operational_action and "?" not in low:
             return "DIAGNOSTIC"
 
         # 8. Explicação Técnica Especializada
-        explain_patterns = [
-            r"\b(o que [eé]|o que sabe|como funciona|qual a diferen[cç]a|como configur|explique|o que significa|para que serve|me ensine|tutorial|pesquise)\b",
-            r"^(qual|quais|como|por que|porque|quando|onde|quantos|quantas)\b",
-            r"\b(m[eé]trica|custo|timer|intervalo|dist[aâ]ncia administrativa|rfc|cabe[cç]alho|formato|limite|m[aá]xim[oa]|m[ií]nim[oa]|padr[aã]o)\b",
-        ]
-        if any(re.search(p, low) for p in explain_patterns):
-            return "EXPLANATION"
-
-        # Se for uma pergunta comum ou diálogo livre sem termos técnicos específicos
-        technical_terms = ["ospf", "bgp", "mpls", "vrp", "ios", "junos", "router", "switch", "vlan", "vpn", "ip", "mtu", "dwdm", "mac", "stp"]
-        if not any(t in low for t in technical_terms) and len(low.split()) > 1:
-            return "GENERAL_CHAT"
-
-        return "EXPLANATION" if len(low) >= 2 else "GREETING"
+        return "EXPLANATION"
 
     def handle_message(
         self,
@@ -1260,279 +1207,6 @@ class ChatService:
             }
             return _finalize_and_record_memory(formatted_markdown, structured_response)
 
-        # 4. Fluxo de Eventos Históricos / Efemérides do Dia (HISTORICAL_EVENTS)
-        if intent == "HISTORICAL_EVENTS":
-            now_utc = datetime.now(timezone.utc)
-            br_tz = timezone(timedelta(hours=-3))
-            now_local = now_utc.astimezone(br_tz)
-            meses = [
-                "janeiro", "fevereiro", "março", "abril", "maio", "junho",
-                "julho", "agosto", "setembro", "outubro", "novembro", "dezembro"
-            ]
-            dia_curr = now_local.day
-            mes_curr = meses[now_local.month - 1]
-
-            date_str = f"{dia_curr} de {mes_curr}"
-            match_date = re.search(r"(\d{1,2})\s+de\s+(janeiro|fevereiro|março|marco|abril|maio|junho|julho|agosto|setembro|outubro|novembro|dezembro)", low)
-            if match_date:
-                date_str = f"{match_date.group(1)} de {match_date.group(2)}"
-
-            # Busca dinâmica na Wikipedia e na Web
-            web_history = search_live_web_and_rfc(f"{date_str} eventos historicos fatos wikipedia", max_results=5, timeout=5.0)
-            web_snips = [r.get("snippet", "") for r in web_history if len(r.get("snippet", "")) > 25]
-
-            # Fatos históricos curados para 17 de outubro
-            curated_events = [
-                "**1604 — Astronomia:** O astrônomo Johannes Kepler observa a supernova Kepler (SN 1604) na constelação de Ofiúco, a última supernova confirmada e visível a olho nu na Via Láctea.",
-                "**1777 — História Mundial:** Na Guerra da Independência dos Estados Unidos, o exército britânico se rende na crucial Batalha de Saratoga, marco decisivo para a vitória dos colonos americanos.",
-                "**1931 — Justiça & Crime:** O gângster Al Capone é condenado por um tribunal federal norte-americano por evasão fiscal, encerrando seu comando do crime organizado em Chicago.",
-                "**1973 — Geopolítica & Energia:** Tem início a histórica Crise do Petróleo de 1973, quando a Organização dos Países Árabes Exportadores de Petróleo declara embargo comercial.",
-                "**1979 — Direitos Humanos:** Madre Teresa de Calcutá é laureada com o Prêmio Nobel da Paz em reconhecimento à sua liderança humanitária e dedicação aos enfermos.",
-                "**1989 — Ciências da Terra:** O Terremoto de Loma Prieta (magnitude 6.9) atinge a área da Baía de São Francisco, transmitido ao vivo para todo o país durante o World Series de beisebol.",
-                "**Telecomunicações & Internet:** Em meados de outubro de 1969, testes pioneiros de transmissão de pacotes conectaram a UCLA e a SRI na ARPANET, inaugurando a arquitetura que deu origem à Internet."
-            ]
-
-            events_md = "\n".join(f"- {e}" for e in curated_events)
-            if web_snips:
-                extra_web = "\n".join(f"- {s}" for s in web_snips[:3])
-                events_md += f"\n\n**🌐 Evidências Adicionais Recuperadas na Web / Enciclopédia:**\n{extra_web}"
-
-            spoken_summary = f"Pesquisei os principais eventos históricos e descobertas científicas que marcaram a data de {date_str}."
-
-            if op_mode == "agent":
-                formatted_markdown = (
-                    f"### 🤖 Veronica — Pesquisa Histórica & Efemérides (Modo Agente)\n\n"
-                    f"**🧠 Thought:** O operador solicitou fatos históricos sobre: *{date_str}*. Consultando enciclopédias e arquivos históricos em tempo real.\n\n"
-                    f"**⚡ Action:** Busca enciclopédica na Wikipedia e acervo histórico web.\n\n"
-                    f"**🔍 Observation:**\n{events_md}"
-                )
-            elif op_mode == "work":
-                formatted_markdown = (
-                    f"### 🛠️ Dossiê Histórico & Efemérides: {date_str}\n\n"
-                    f"Principais marcos históricos mundiais, científicos e de telecomunicações associados a esta data:\n\n"
-                    f"{events_md}"
-                )
-            else:
-                formatted_markdown = (
-                    f"Hoje é **{date_str}**! Esta data foi palco de eventos memoráveis na história da humanidade, na ciência e na tecnologia:\n\n"
-                    f"{events_md}\n\n"
-                    f"Existe algum desses acontecimentos ou período histórico específico sobre o qual você gostaria de se aprofundar?"
-                )
-
-            structured_response = {
-                "agent_name": "Veronica",
-                "model_version": self.trainer.model_version,
-                "intent": intent,
-                "mode": op_mode,
-                "diagnosis": f"Fatos históricos e efemérides de {date_str} recuperados e analisados.",
-                "epistemic_breakdown": {
-                    "verified_facts": [f"Marcos históricos confirmados para a data de {date_str}."],
-                    "technical_inferences": ["Correlação cronológica e enciclopédica verificada."],
-                    "hypotheses": []
-                },
-                "evidences": [r.get("url", "https://pt.wikipedia.org") for r in web_history] if web_history else ["Bases enciclopédicas históricas."],
-                "technical_sources": [],
-                "compatibility": ["História mundial e enciclopédias oficiais."],
-                "risk": "BAIXO (Consulta educacional e cultural)",
-                "safe_diagnostic_commands": [],
-                "proposed_commands": [],
-                "validation_plan": [],
-                "rollback_plan": [],
-                "limitations_and_unknowns": [],
-                "spoken_summary": spoken_summary,
-                "confidence": 1.0,
-            }
-            return _finalize_and_record_memory(formatted_markdown, structured_response)
-
-        # 5. Fluxo de Integração de Sistemas & Geração de Código / Diagramas (INTEGRATION_REQUEST)
-        if intent == "INTEGRATION_REQUEST":
-            recent_t = conv_context.get("recent_topics", [])
-            last_text = (conv_context.get("last_user_query", "") + " " + conv_context.get("last_asst_content", "")).lower()
-
-            if "bgp" in recent_t or "bgp" in last_text:
-                topic_subject = "Coletor e Alertador de Sessões BGP em Tempo Real"
-            elif "ne40" in recent_t or "huawei" in last_text:
-                topic_subject = "Integração e Automação Multi-Vendor com Huawei VRP 8 (NE40E)"
-            elif "ccr2004" in recent_t or "mikrotik" in last_text:
-                topic_subject = "Integração MikroTik RouterOS v7 via REST API Assíncrona"
-            elif "ospf" in recent_t or "ospf" in last_text or "metrica" in last_text:
-                topic_subject = "Automação de Métricas OSPF & Drenagem Gradual de Tráfego (RFC 6987 Stub Router)"
-            else:
-                topic_subject = "Microsserviço de Observabilidade & Telemetria Multi-Vendor"
-
-            mermaid_diagram = (
-                "```mermaid\n"
-                "sequenceDiagram\n"
-                "  autonumber\n"
-                "  actor Op as Engenheiro / Sistema NMS\n"
-                "  participant API as Veronica Integration Agent (FastAPI)\n"
-                "  participant Router as Roteador de Rede (Core / Borda)\n"
-                "  participant Mon as Prometheus / Grafana / Zabbix\n"
-                "  Op->>API: POST /api/v1/network/trigger-action (Parâmetros)\n"
-                "  API->>Router: Coleta de Estado & Validação Prévia (Somente Leitura)\n"
-                "  Router-->>API: Telemetria de Estado (Nominal)\n"
-                "  API->>Router: Aplicação Segura com Rollback Automático\n"
-                "  Router-->>API: Confirmação de Aplicação\n"
-                "  API->>Mon: Exportação de Métricas de Transição\n"
-                "  API-->>Op: Relatório Estruturado de Sucesso (200 OK)\n"
-                "```"
-            )
-
-            python_code = (
-                "```python\n"
-                "# ===================================================================\n"
-                f"# Veronica Network Automation Engine — Módulo de Integração\n"
-                f"# Aplicação: {topic_subject}\n"
-                "# Padrão: FastAPI assíncrono + Pydantic v2 + Tratamento de Erros e Logs\n"
-                "# ===================================================================\n\n"
-                "from fastapi import FastAPI, HTTPException, BackgroundTasks\n"
-                "from pydantic import BaseModel, Field\n"
-                "from typing import List, Dict, Any, Optional\n"
-                "import asyncio\n"
-                "import logging\n"
-                "from datetime import datetime, timezone\n\n"
-                "logging.basicConfig(level=logging.INFO, format='%(asctime)s [%(levelname)s] %(message)s')\n"
-                "logger = logging.getLogger('VeronicaIntegration')\n\n"
-                "app = FastAPI(\n"
-                f"    title='Veronica Integration API — {topic_subject}',\n"
-                "    version='2.0.0',\n"
-                "    description='Microsserviço autônomo para integração de telemetria e automação de redes multi-vendor.'\n"
-                ")\n\n"
-                "class MetricAdjustmentRequest(BaseModel):\n"
-                "    device_id: str = Field(..., example='ROUTER-CORE-01')\n"
-                "    vendor: str = Field(..., example='Cisco', description='Cisco, Huawei, Juniper, MikroTik')\n"
-                "    target_metric: int = Field(65535, ge=1, le=65535, description='Métrica OSPF (RFC 6987 MaxLinkMetric = 65535)')\n"
-                "    reason: str = Field(..., example='Janela de manutenção preventiva')\n"
-                "    operator_id: str = Field(..., example='usr-eng-01')\n\n"
-                "class IntegrationResponse(BaseModel):\n"
-                "    status: str\n"
-                "    device_id: str\n"
-                "    applied_metric: int\n"
-                "    timestamp: str\n"
-                "    rollback_ready: bool\n"
-                "    details: Dict[str, Any]\n\n"
-                "async def sync_with_observability_pipeline(device_id: str, metric: int):\n"
-                "    '''Notifica Prometheus, Grafana e NMS sobre a alteração em segundo plano.'''\n"
-                "    await asyncio.sleep(0.5)\n"
-                "    logger.info(f'[TELEMETRY-SYNC] Notificado coletor NMS: {device_id} ajustado para métrica {metric}')\n\n"
-                "@app.post('/api/v1/network/adjust-metric', response_model=IntegrationResponse)\n"
-                "async def adjust_network_metric(req: MetricAdjustmentRequest, bg: BackgroundTasks):\n"
-                "    logger.info(f'[VERONICA-INTEGRATION] Recebido pedido para {req.device_id} ({req.vendor}) por {req.operator_id}')\n"
-                "    try:\n"
-                "        # 1. Pré-checagem de conectividade e telemetria\n"
-                "        # 2. Execução segura com commit confirmed nativo\n"
-                "        # 3. Pós-validação com exportação de métricas assíncronas\n"
-                "        bg.add_task(sync_with_observability_pipeline, req.device_id, req.target_metric)\n"
-                "        return IntegrationResponse(\n"
-                "            status='SUCCESS_APPLIED',\n"
-                "            device_id=req.device_id,\n"
-                "            applied_metric=req.target_metric,\n"
-                "            timestamp=datetime.now(timezone.utc).isoformat(),\n"
-                "            rollback_ready=True,\n"
-                "            details={\n"
-                "                'vendor': req.vendor,\n"
-                "                'reason': req.reason,\n"
-                "                'drain_mode': 'RFC_6987_STUB_ROUTER' if req.target_metric == 65535 else 'CUSTOM_METRIC',\n"
-                "                'rollback_command': 'commit trial 120 / commit confirmed 120',\n"
-                "            }\n"
-                "        )\n"
-                "    except Exception as exc:\n"
-                "        logger.error(f'Erro na integração: {exc}')\n"
-                "        raise HTTPException(status_code=500, detail=str(exc))\n\n"
-                "@app.get('/health')\n"
-                "async def health_check():\n"
-                "    return {'status': 'healthy', 'agent': 'Veronica', 'version': '2.0.0'}\n"
-                "```"
-            )
-
-            spoken_summary = f"Estruturei ideias de arquitetura e desenvolvi um exemplo de código completo em Python para integrar {topic_subject} aos seus sistemas."
-
-            formatted_markdown = (
-                f"### 💡 Ideias de Arquitetura & Código de Integração — {topic_subject}\n\n"
-                f"Analisando o contexto da nossa conversa, formulei **4 abordagens estratégicas de arquitetura** para você integrar esse mecanismo de forma profissional aos seus sistemas corporativos:\n\n"
-                f"1. **Camada de Microsserviço Assíncrono com FastAPI (Recomendado):**\n"
-                f"   - Criação de uma API REST/JSON com validação rígida de tipos (Pydantic), permitindo que seu portal NMS, sistemas CI/CD ou bots invoquem ações de rede de forma segura e auditada.\n\n"
-                f"2. **Pipeline de Telemetria e Observabilidade em Tempo Real:**\n"
-                f"   - Exportação automática de métricas para **Prometheus / Grafana**, emitindo alertas visuais imediatos sempre que um roteador entra em modo de drenagem de tráfego (`MaxLinkMetric 65535`) ou sofre transição de estado.\n\n"
-                f"3. **Gatilhos de Manutenção Segura com Rollback Automático:**\n"
-                f"   - Execução com temporizador de segurança (`commit confirmed 120` no Cisco/Junos ou `commit trial 120` no Huawei VRP), revertendo automaticamente a configuração estável caso o operador perca a conectividade.\n\n"
-                f"4. **Webhooks de Integração para SIEM e Ferramentas de Incidentes:**\n"
-                f"   - Disparo assíncrono de notificações para canais corporativos (Slack, Discord, Microsoft Teams ou Jira Service Management) a cada mudança realizada.\n\n"
-                f"#### 📊 Diagrama de Integração de Sistemas Criado pela Veronica\n"
-                f"{mermaid_diagram}\n\n"
-                f"#### 🐍 Exemplo de Código Desenvolvido pela Veronica (Python / FastAPI)\n"
-                f"{python_code}\n\n"
-                f"#### 🚀 Como Executar este Exemplo em Produção:\n"
-                f"```bash\n"
-                f"pip install fastapi uvicorn pydantic httpx\n"
-                f"uvicorn integration_service:app --host 0.0.0.0 --port 8080 --reload\n"
-                f"```\n\n"
-                f"Posso customizar esse código para utilizar drivers específicos como **Netmiko**, **Scrapli**, **ncclient (NETCONF)** ou **gNMI** se você preferir!"
-            )
-
-            structured_response = {
-                "agent_name": "Veronica",
-                "model_version": self.trainer.model_version,
-                "intent": intent,
-                "mode": op_mode,
-                "diagnosis": f"Arquitetura de integração e código desenvolvidos com sucesso para {topic_subject}.",
-                "epistemic_breakdown": {
-                    "verified_facts": [
-                        f"Tema da integração contextualizado: {topic_subject}.",
-                        "Código gerado com validação Pydantic e FastAPI assíncrono.",
-                    ],
-                    "technical_inferences": ["Arquitetura modular compatível com pipelines de CI/CD e NMS."],
-                    "hypotheses": ["Recomenda-se teste em ambiente de staging antes da ativação em produção."]
-                },
-                "evidences": ["Engenharia de software e padrões IETF RFC."],
-                "technical_sources": [],
-                "compatibility": ["Multi-Vendor Python 3.10+, FastAPI, RESTCONF, NETCONF."],
-                "risk": "BAIXO (Exemplo de código e arquitetura consultiva)",
-                "safe_diagnostic_commands": [],
-                "proposed_commands": [],
-                "validation_plan": ["Validar sintaxe e testes unitários com pytest antes do deploy."],
-                "rollback_plan": [],
-                "limitations_and_unknowns": [],
-                "spoken_summary": spoken_summary,
-                "confidence": 1.0,
-            }
-            return _finalize_and_record_memory(formatted_markdown, structured_response)
-
-        # 6. Fluxo de Diálogo Geral e Chat Cotidiano (GENERAL_CHAT)
-        if intent == "GENERAL_CHAT":
-            spoken_summary = "Estou aqui para conversar e colaborar com o que você precisar."
-            formatted_markdown = (
-                "Olá! Entendi perfeitamente sua mensagem.\n\n"
-                "Como sua parceira de IA, posso dialogar sobre qualquer assunto — desde dúvidas cotidianas, história e tecnologia até "
-                "engenharia de redes, arquitetura de sistemas e geração de códigos em Python.\n\n"
-                "Estou com minha memória ativa e aprendendo a cada conversa. Em que posso colaborar com você agora?"
-            )
-            structured_response = {
-                "agent_name": "Veronica",
-                "model_version": self.trainer.model_version,
-                "intent": intent,
-                "mode": op_mode,
-                "diagnosis": "Conversação aberta e natural com o operador.",
-                "epistemic_breakdown": {
-                    "verified_facts": ["Diálogo conversacional ativo."],
-                    "technical_inferences": ["Operador interagindo em modo chat livre."],
-                    "hypotheses": []
-                },
-                "evidences": ["Motor conversacional Veronica."],
-                "technical_sources": [],
-                "compatibility": ["Universal."],
-                "risk": "BAIXO (Interação geral)",
-                "safe_diagnostic_commands": [],
-                "proposed_commands": [],
-                "validation_plan": [],
-                "rollback_plan": [],
-                "limitations_and_unknowns": [],
-                "spoken_summary": spoken_summary,
-                "confidence": 1.0,
-            }
-            return _finalize_and_record_memory(formatted_markdown, structured_response)
-
-        # 6.5. Fluxo de Geração de Imagem / Desenho Técnico (IMAGE_GENERATION)
         if intent == "IMAGE_GENERATION":
             svg_markup = self._generate_svg_image_for_prompt(message_text)
             spoken_summary = "Desenvolvi e gerei a representação visual solicitada da arquitetura de rede."
@@ -1610,19 +1284,18 @@ class ChatService:
 
         # 7. Pesquisa e explicacao aberta: recuperar evidencias do dominio da pergunta.
         if intent == "EXPLANATION":
-            search_query = message_text
-            if conv_context.get("is_followup") and conv_context.get("last_user_query"):
-                search_query = f"{conv_context['last_user_query']} {message_text}"
+            previous_query = str(conv_context.get("last_user_query", "")).strip()
+            search_query = f"{previous_query} {message_text}".strip() if previous_query else message_text
+            focus_query = message_text if _focus_terms(message_text) else previous_query or message_text
 
             rag_res = self.rag.search(search_query, top_k=4)
             local_results = rag_res.get("results", [])
-            is_followup = bool(conv_context.get("is_followup"))
-            focus_terms = _focus_terms(message_text) if is_followup else set()
+            focus_terms = _focus_terms(focus_query)
             local_candidates = [
                 item for item in local_results
                 if float(item.get("query_coverage", 0.0)) >= 0.35
                 and _matches_focus(
-                    f"{item.get('document', {}).get('title', '')} {item.get('document', {}).get('feature', '')} {item.get('document', {}).get('content', '')}",
+                    f"{item.get('document', {}).get('title', '')} {item.get('document', {}).get('feature', '')}",
                     focus_terms,
                 )
             ]
@@ -1634,7 +1307,7 @@ class ChatService:
                     research_bundle = self.hub.research_open_domain(
                         search_query,
                         max_results=7,
-                        focus_query=message_text if is_followup else None,
+                        focus_query=focus_query,
                     )
                     web_results = research_bundle.get("sources", [])
                     web_synthesis = research_bundle.get("synthesis", {})
@@ -1670,7 +1343,7 @@ class ChatService:
                     })
                     if len(citations) >= 3:
                         break
-            if not answer_parts and local_candidates:
+            if not answer_parts and not web_results and local_candidates:
                 for item in local_candidates[:2]:
                     doc = item.get("document", {})
                     title = doc.get("title") or doc.get("family_model") or "Memoria documental"
@@ -1685,7 +1358,8 @@ class ChatService:
                 episode = relevant_memories[0]
                 details = episode.get("perceptual_details", {})
                 previous_response = str(details.get("assistant_response", "")).strip()
-                if previous_response:
+                memory_query = str(details.get("user_message", "")) or str(episode.get("experience_summary", ""))
+                if previous_response and _matches_focus(memory_query, focus_terms):
                     answer_parts.append(f"Retomando uma conversa anterior: {previous_response[:1200]}")
                     memory_used = True
                     for source in details.get("sources", [])[:3]:
@@ -1708,7 +1382,10 @@ class ChatService:
                 topic_name = "Fonte pertinente nao localizada"
 
             if dev and hasattr(dev, "neurogenesis"):
-                words = [token for token in re.findall(r"[\w-]{4,}", message_text) if token.lower() not in stop_words]
+                words = [
+                    token for token in re.findall(r"[\w-]{4,}", message_text)
+                    if token.lower() not in _FOCUS_STOP_WORDS
+                ]
                 for concept in words[:3]:
                     try:
                         dev.neurogenesis.trigger_neurogenesis_for_concept(concept=concept.upper(), modality="CHAT_DIALOGUE", intensity=1)
@@ -2611,6 +2288,58 @@ class VeronicaPlatformHub:
                     "answer": "Não consegui gerar uma resposta confiável agora. Tente novamente em instantes ou reformule a pergunta.",
                 }
 
+            # Informational Agent turns answer from live evidence instead of local snippets.
+            if self.chat_service._classify_intent(user_message, None) == "EXPLANATION":
+                previous_user = next((
+                    str(item.get("content", "")) for item in reversed(history[:-1])
+                    if item.get("role") == "user" and item.get("content")
+                ), "")
+                research_query = f"{previous_user} {user_message}".strip() if previous_user else user_message
+                focus_query = user_message if _focus_terms(user_message) else previous_user or user_message
+                try:
+                    research = await asyncio.to_thread(
+                        self.research_open_domain, research_query, 7, focus_query
+                    )
+                    synthesis = research.get("synthesis", {})
+                    answer = str(synthesis.get("answer", "")).strip()
+                    sources = research.get("sources", [])
+                    if answer and sources:
+                        source_links = [
+                            f"[{item.get('title') or 'Fonte'}]({item.get('url')})"
+                            for item in sources[:3] if item.get("url")
+                        ]
+                        if source_links:
+                            answer += "\n\nFontes: " + " ? ".join(source_links)
+                        try:
+                            memory = self.development_engine.memory
+                            source_memory = [
+                                {"title": str(item.get("title", ""))[:160], "url": str(item.get("url", ""))[:500]}
+                                for item in sources[:5]
+                            ]
+                            memory.record_episodic_memory(
+                                modality="CONVERSATION",
+                                experience_summary=f"[AGENT WEB] {scrub_secrets(user_message)[:220]} | Veronica: {scrub_secrets(answer)[:300]}",
+                                perceptual_details={
+                                    "mode": "agent", "user_id": requester_user_id,
+                                    "user_message": scrub_secrets(user_message)[:1200],
+                                    "assistant_response": scrub_secrets(answer)[:2400],
+                                    "sources": source_memory,
+                                },
+                                emotive_valence="SATISFACAO", salience=0.75,
+                                associated_concepts=sorted(_focus_terms(user_message))[:6] or ["WEB_RESEARCH"],
+                            )
+                        except Exception:
+                            import logging
+                            logging.getLogger(__name__).exception("Could not persist Agent research memory")
+                        return {"thought": "", "tool_calls": [], "answer": answer}
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception("Agent open-domain research failed")
+                return {
+                    "thought": "", "tool_calls": [],
+                    "answer": "N?o encontrei fontes web suficientemente relacionadas para responder com seguran?a. Tente reformular a pergunta.",
+                }
+
             preferences = next((item.get("response_preferences", {}) for item in evidence
                                 if isinstance(item, dict) and isinstance(item.get("response_preferences"), dict)), {})
             technical_evidence = [item for item in evidence if not (isinstance(item, dict) and "response_preferences" in item)]
@@ -2822,7 +2551,7 @@ class VeronicaPlatformHub:
                 "authority_score": trust["authority_score"], "relevance": round(overlap, 3),
                 "retrieval_score": round(overlap * 0.72 + float(trust["authority_score"]) * 0.28, 4),
             })
-            result["_focus_match"] = _matches_focus(f"{title} {snippet}", focus_terms)
+            result["_focus_match"] = _matches_focus(title, focus_terms)
             normalized.append(result)
         normalized.sort(key=lambda item: (item["_focus_match"], item["retrieval_score"], item["relevance"]), reverse=True)
 
@@ -2854,7 +2583,7 @@ class VeronicaPlatformHub:
 
         normalized = [
             item for item in normalized
-            if _matches_focus(f"{item['title']} {item['content'][:12000]}", focus_terms)
+            if _matches_focus(item["title"], focus_terms)
         ]
 
         for item in normalized:

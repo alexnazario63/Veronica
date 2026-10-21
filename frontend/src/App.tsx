@@ -106,10 +106,10 @@ export default function VeronicaApp() {
     chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
   }
   async function selectConversation(id: string) {
-    setConversationId(id); setError(''); setSidebarOpen(false);
+    setError(''); setSidebarOpen(false);
     stickToBottom.current = true; setShowScrollToBottom(false);
-    try { const data = await api<{ messages?: { role: string; content: string; structured_payload?: StructuredAssistantPayload & { model_profile?: string; response_style?: string } }[] }>(`/api/conversations/${id}`); setMessages((data.messages || []).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content, payload: m.structured_payload, profile: ['vrn-fast', 'vrn-pro', 'vrn-ultra'].includes(m.structured_payload?.model_profile || '') ? m.structured_payload?.model_profile as ModelProfile : undefined, style: ['technical', 'natural', 'mixed', 'engineer'].includes(m.structured_payload?.response_style || '') ? m.structured_payload?.response_style as ResponseStyle : undefined }))); }
-    catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível abrir a conversa'); }
+    try { const data = await api<{ messages?: { role: string; content: string; structured_payload?: StructuredAssistantPayload & { model_profile?: string; response_style?: string } }[] }>(`/api/conversations/${id}`); setConversationId(id); setMessages((data.messages || []).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content, payload: m.structured_payload, profile: ['vrn-fast', 'vrn-pro', 'vrn-ultra'].includes(m.structured_payload?.model_profile || '') ? m.structured_payload?.model_profile as ModelProfile : undefined, style: ['technical', 'natural', 'mixed', 'engineer'].includes(m.structured_payload?.response_style || '') ? m.structured_payload?.response_style as ResponseStyle : undefined }))); }
+    catch (e) { setConversationId(''); setMessages([]); setError(e instanceof Error ? e.message : 'Não foi possível abrir a conversa'); }
   }
   async function newConversation() {
     restoredLatestConversation.current = true;
@@ -139,7 +139,7 @@ export default function VeronicaApp() {
       try {
         await api<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title }) });
         setConversations(current => [{ conversation_id: id!, title }, ...current.filter(item => item.conversation_id !== id)]);
-      } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível atualizar o título da conversa'); }
+      } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível atualizar o título da conversa'); return; }
     }
     stickToBottom.current = true; setShowScrollToBottom(false);
     setDraft(''); setError(''); setThoughts([]); setTools([]); setMessages(prev => [...prev, { role: 'user', content: displayDraft, profile: modelProfile, style: responseStyle }, { role: 'assistant', content: '', profile: modelProfile, style: responseStyle }]); setBusy(true);
@@ -147,7 +147,10 @@ export default function VeronicaApp() {
     try {
       const endpoint = mode === 'agent' ? 'agent-stream' : 'stream';
       const response = await fetch(`/api/conversations/${id}/${endpoint}`, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', 'X-User-Id': 'usr-eng-01' }, body: JSON.stringify({ content, mode, model_profile: modelProfile, response_style: responseStyle }) });
-      if (!response.ok || !response.body) throw new Error(`Falha no stream (${response.status})`);
+      if (!response.ok || !response.body) {
+        const failure = await response.json().catch(() => ({}));
+        throw new Error(failure.detail || `Falha no stream (${response.status})`);
+      }
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
         const { value, done } = await reader.read(); if (done) break; buffer += decoder.decode(value, { stream: true });
@@ -155,7 +158,8 @@ export default function VeronicaApp() {
         for (const chunk of chunks) {
           const line = chunk.split('\n').find(s => s.startsWith('data: ')); if (!line) continue;
           const ev = JSON.parse(line.slice(6));
-          if (ev.type === 'token') appendAssistant(ev.token_text || ev.token || '');
+          if (ev.type === 'error') throw new Error(ev.message || 'Falha ao gerar a resposta');
+          else if (ev.type === 'token') appendAssistant(ev.token_text || ev.token || '');
           else if (ev.type === 'complete') setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, content: ev.content || m.content, payload: ev.structured_payload } : m));
           else if (ev.type === 'message_delta') appendAssistant(ev.delta || '');
           else if (ev.type === 'thought_delta') setThoughts(prev => [...prev, ev.delta || '']);

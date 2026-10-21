@@ -83,6 +83,21 @@ class RotaryPositionalEmbedding(Module):
         Como a rotação é ortogonal R(theta), sua transposta no passo backward é R(-theta).
         """
         seq_len = x.shape[-2]
+        required_length = max(0, int(offset)) + seq_len
+        if required_length > self.cos_cached.shape[0]:
+            # Cached decoding can reach the configured window through a caller
+            # that does not know the cache capacity. Grow RoPE tables instead
+            # of producing an empty slice that cannot broadcast over Q/K.
+            new_length = max(required_length, self.cos_cached.shape[0] * 2)
+            inv_freq = 1.0 / (
+                self.base ** (np.arange(0, self.head_dim, 2, dtype=np.float64) / float(self.head_dim))
+            )
+            positions = np.arange(new_length, dtype=np.float64)
+            freqs = np.outer(positions, inv_freq)
+            self.cos_cached = np.cos(freqs)
+            self.sin_cached = np.sin(freqs)
+            self.max_seq_len = new_length
+        offset = max(0, int(offset))
         cos = self.cos_cached[offset : offset + seq_len][np.newaxis, np.newaxis, :, :]
         sin = self.sin_cached[offset : offset + seq_len][np.newaxis, np.newaxis, :, :]
 

@@ -9,6 +9,7 @@ from __future__ import annotations
 import asyncio
 from dataclasses import asdict
 import json
+import logging
 from pathlib import Path
 from typing import Any, Dict, List, Literal, Optional
 
@@ -354,6 +355,13 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                         break
                     yield sse_frame(event, event.get("type"))
                     await asyncio.sleep(0.005)
+            except Exception:
+                logging.getLogger(__name__).exception("Chat stream failed for conversation %s", conversation_id)
+                if not await request.is_disconnected():
+                    yield sse_frame(
+                        {"type": "error", "message": "A Veronica encontrou um erro ao gerar a resposta. Tente novamente."},
+                        "error",
+                    )
             finally:
                 if await request.is_disconnected():
                     hub.chat_service.cancel_generation(conversation_id)
@@ -381,6 +389,21 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                         orchestrator = hub.build_agent_orchestrator(x_user_id)
                         app.state.agent_orchestrators[x_user_id] = orchestrator
                 if orchestrator is not None:
+                    # Restore persisted conversation context when an Agent session is new.
+                    if not orchestrator.sessions.get(conversation_id):
+                        from knowledge.ingestion.sanitizer import sanitize_untrusted_text
+                        stored = hub.conversation_service.get_conversation(conversation_id, x_user_id)
+                        restored = [
+                            {
+                                "role": message.get("role"),
+                                "content": sanitize_untrusted_text(
+                                    str(message.get("content", "")), source="stored_conversation_context"
+                                ).text,
+                            }
+                            for message in stored.get("messages", [])
+                            if message.get("role") in {"user", "assistant"} and message.get("content")
+                        ]
+                        orchestrator.sessions[conversation_id] = restored[-12:]
                     hub.conversation_service.append_message(
                         conversation_id=conversation_id, user_id=x_user_id,
                         role="user", content=req.content, modality=req.modality,
@@ -436,6 +459,13 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                         payload = event
                     yield sse_frame(payload, payload.get("type") if isinstance(payload, dict) else None)
                     await asyncio.sleep(0)
+            except Exception:
+                logging.getLogger(__name__).exception("Agent stream failed for conversation %s", conversation_id)
+                if not await request.is_disconnected():
+                    yield sse_frame(
+                        {"type": "error", "message": "O modo Agent encontrou um erro ao gerar a resposta. Tente novamente."},
+                        "error",
+                    )
             finally:
                 if await request.is_disconnected():
                     hub.chat_service.cancel_generation(conversation_id)
