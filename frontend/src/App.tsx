@@ -1,5 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, ArrowUp, Bot, BrainCircuit, Check, ChevronDown, CircleHelp, ClipboardList, Command, FileText, Gauge, GitBranch, Menu, Moon, Network, Plus, Search, Settings2, ShieldCheck, Square, Sun, Trash2, Wrench } from 'lucide-react';
+import { Activity, ArrowDown, ArrowUp, Bot, BrainCircuit, Check, ChevronDown, CircleHelp, ClipboardList, Command, FileText, Gauge, GitBranch, Menu, Moon, Network, Plus, Search, Settings2, ShieldCheck, Square, Sun, Trash2, Wrench } from 'lucide-react';
 import { create } from 'zustand';
 import cytoscape, { type ElementDefinition } from 'cytoscape';
 import type { ArchitectureNode, StructuredAssistantPayload, TrainingStepMetric } from './types/veronica';
@@ -37,6 +37,7 @@ export default function VeronicaApp() {
   const [tools, setTools] = useState<string[]>([]);
   const [historyOpen, setHistoryOpen] = useState(true);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [showScrollToBottom, setShowScrollToBottom] = useState(false);
   const [theme, setTheme] = useState<'light' | 'dark'>(() => {
     try { return localStorage.getItem('veronica-theme') === 'dark' ? 'dark' : 'light'; }
     catch { return 'light'; }
@@ -50,8 +51,12 @@ export default function VeronicaApp() {
     catch { return 'technical'; }
   });
   const aborter = useRef<AbortController | null>(null);
+  const chatScrollRef = useRef<HTMLElement | null>(null);
+  const stickToBottom = useRef(true);
+  const restoredLatestConversation = useRef(false);
   const logLines = useMemo(() => draft.split('\n').length, [draft]);
   const displayDraft = logLines > 14 ? `[Log: ${logLines} linhas]` : draft;
+  const activeConversation = conversations.find(item => item.conversation_id === conversationId);
 
   useEffect(() => {
     const syncRoute = () => setView(viewFromPath());
@@ -71,17 +76,45 @@ export default function VeronicaApp() {
   const refresh = async () => {
     try {
       const [c, inventory, saved] = await Promise.all([api<{ conversations: Conversation[] }>('/api/conversations'), api<{ devices: typeof devices }>('/api/network/inventory'), api<{ artifacts: StoredArtifact[] }>('/api/workspace/artifacts').catch(() => ({ artifacts: [] }))]);
-      setConversations(c.conversations || []); setDevices(inventory.devices || []); setWorkspaceArtifacts(saved.artifacts || []);
+      const rows = c.conversations || [];
+      setConversations(rows); setDevices(inventory.devices || []); setWorkspaceArtifacts(saved.artifacts || []);
+      if (!restoredLatestConversation.current) {
+        restoredLatestConversation.current = true;
+        if (rows[0]) void selectConversation(rows[0].conversation_id);
+      }
     } catch (e) { setError(e instanceof Error ? e.message : 'API indisponível'); }
   };
   useEffect(() => { void refresh(); }, []);
+  useEffect(() => {
+    if (!stickToBottom.current) return;
+    const frame = requestAnimationFrame(() => {
+      const scroller = chatScrollRef.current;
+      if (scroller) scroller.scrollTop = scroller.scrollHeight;
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [messages]);
+  function onChatScroll() {
+    const scroller = chatScrollRef.current;
+    if (!scroller) return;
+    const atBottom = scroller.scrollHeight - scroller.scrollTop - scroller.clientHeight < 120;
+    stickToBottom.current = atBottom;
+    setShowScrollToBottom(!atBottom && messages.length > 0);
+  }
+  function scrollToLatest() {
+    stickToBottom.current = true;
+    setShowScrollToBottom(false);
+    chatScrollRef.current?.scrollTo({ top: chatScrollRef.current.scrollHeight, behavior: 'smooth' });
+  }
   async function selectConversation(id: string) {
     setConversationId(id); setError(''); setSidebarOpen(false);
+    stickToBottom.current = true; setShowScrollToBottom(false);
     try { const data = await api<{ messages?: { role: string; content: string; structured_payload?: StructuredAssistantPayload & { model_profile?: string; response_style?: string } }[] }>(`/api/conversations/${id}`); setMessages((data.messages || []).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content, payload: m.structured_payload, profile: ['vrn-fast', 'vrn-pro', 'vrn-ultra'].includes(m.structured_payload?.model_profile || '') ? m.structured_payload?.model_profile as ModelProfile : undefined, style: ['technical', 'natural', 'mixed', 'engineer'].includes(m.structured_payload?.response_style || '') ? m.structured_payload?.response_style as ResponseStyle : undefined }))); }
     catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível abrir a conversa'); }
   }
   async function newConversation() {
-    try { const c = await api<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: 'Nova conversa' }) }); await refresh(); setConversationId(c.conversation_id); setMessages([]); setSidebarOpen(false); }
+    restoredLatestConversation.current = true;
+    setConversationId(''); setMessages([]); setThoughts([]); setTools([]); setShowScrollToBottom(false); setSidebarOpen(false);
+    try { const c = await api<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: 'Nova conversa' }) }); await refresh(); setConversationId(c.conversation_id); setMessages([]); stickToBottom.current = true; setShowScrollToBottom(false); setSidebarOpen(false); }
     catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível criar conversa'); }
   }
   async function deleteConversation(event: React.MouseEvent, conversation: Conversation) {
@@ -99,8 +132,16 @@ export default function VeronicaApp() {
   }
   async function send() {
     const content = draft.trim(); if (!content || busy) return;
+    const title = conversationTitle(content);
     let id = conversationId;
-    if (!id) { try { const c = await api<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: content.slice(0, 48) }) }); id = c.conversation_id; setConversationId(id); await refresh(); } catch (e) { setError(e instanceof Error ? e.message : 'Falha ao criar conversa'); return; } }
+    if (!id) { try { const c = await api<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify({ title }) }); id = c.conversation_id; setConversationId(id); restoredLatestConversation.current = true; await refresh(); } catch (e) { setError(e instanceof Error ? e.message : 'Falha ao criar conversa'); return; } }
+    else {
+      try {
+        await api<Conversation>(`/api/conversations/${encodeURIComponent(id)}`, { method: 'PATCH', body: JSON.stringify({ title }) });
+        setConversations(current => [{ conversation_id: id!, title }, ...current.filter(item => item.conversation_id !== id)]);
+      } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível atualizar o título da conversa'); }
+    }
+    stickToBottom.current = true; setShowScrollToBottom(false);
     setDraft(''); setError(''); setThoughts([]); setTools([]); setMessages(prev => [...prev, { role: 'user', content: displayDraft, profile: modelProfile, style: responseStyle }, { role: 'assistant', content: '', profile: modelProfile, style: responseStyle }]); setBusy(true);
     const controller = new AbortController(); aborter.current = controller;
     try {
@@ -148,15 +189,22 @@ export default function VeronicaApp() {
     </aside>
     {view === 'observatory' ? <Observatory/> : <>
       <main className="main"><header className="topbar"><div><button className="mobile-menu" onClick={() => setSidebarOpen(open => !open)} aria-label={sidebarOpen ? 'Fechar menu lateral' : 'Abrir menu lateral'}><Menu size={17}/></button><span className="status-dot"/> Veronica Transformer <span className="version">LOCAL · {mode === 'agent' ? 'AGENT' : 'CHAT'}</span></div><div className="top-actions"><label className="preference-control"><span>Modelo</span><select aria-label="Modelo Veronica" title="Perfil local: rápido, equilibrado ou resposta ampliada" disabled={busy} value={modelProfile} onChange={event => setModelProfile(event.target.value as ModelProfile)}><option value="vrn-fast">VRN-fast</option><option value="vrn-pro">VRN-pro</option><option value="vrn-ultra">VRN-ultra</option></select></label><label className="preference-control response-control"><span>Resposta</span><select aria-label="Estilo da resposta" title="Escolha como a Veronica apresenta a resposta" disabled={busy} value={responseStyle} onChange={event => setResponseStyle(event.target.value as ResponseStyle)}><option value="technical">Técnica</option><option value="natural">Natural</option><option value="mixed">Mista</option><option value="engineer">Engenheira</option></select></label><button className={mode === 'chat' ? 'mode active' : 'mode'} onClick={() => setMode('chat')}><Bot size={15}/> Chat</button><button className={mode === 'agent' ? 'mode active' : 'mode'} onClick={() => setMode('agent')}><Wrench size={15}/> Agent</button><button className="theme-toggle" onClick={() => setTheme(current => current === 'light' ? 'dark' : 'light')} aria-label={`Ativar tema ${theme === 'light' ? 'escuro' : 'claro'}`} title={`Tema ${theme === 'light' ? 'escuro' : 'claro'}`}>{theme === 'light' ? <Moon size={16}/> : <Sun size={16}/>}<span>{theme === 'light' ? 'Escuro' : 'Claro'}</span></button><span className="secure"><ShieldCheck size={14}/> Ambiente seguro</span></div></header>
-        <section className="chat-scroll">{messages.length === 0 ? <div className="welcome"><div className="welcome-icon"><BrainCircuit size={30}/></div><p className="eyebrow">CHAT · AGENT · WORK</p><h1>Como posso ajudar na sua rede?</h1><p>Investigue incidentes, consulte documentação ou prepare mudanças seguras com a Veronica.</p><div className="suggestions"><button onClick={() => setDraft('/diagnostico Investigue instabilidade de BGP')}> <Activity size={17}/>Diagnosticar incidente<small>/diagnostico</small></button><button onClick={() => setDraft('/simular Verifique impacto da mudança')}> <GitBranch size={17}/>Simular impacto<small>/simular</small></button><button onClick={() => setDraft('/mudanca Planeje alteração de configuração')}> <ClipboardList size={17}/>Planejar mudança<small>/mudanca</small></button></div></div> : <div className="messages">{messages.map((m, i) => <article key={i} className={`message ${m.role}`}><div className="message-avatar">{m.role === 'user' ? 'A' : <BrainCircuit size={18}/>}</div><div className="message-body"><div className="message-author">{m.role === 'user' ? 'Você' : 'Veronica'}{m.role === 'assistant' && m.payload && m.payload.intent !== 'GREETING' && <span className="epistemic fact">Resposta técnica</span>}{m.profile && <span className={`message-profile ${m.profile}`}>{m.profile.toUpperCase()}</span>}{m.style && <span className="message-style">{({ technical: 'Técnica', natural: 'Natural', mixed: 'Mista', engineer: 'Engenheira' } as Record<ResponseStyle, string>)[m.style]}</span>}</div><div className="message-text">{m.content || (busy && i === messages.length - 1 ? <span className="typing">Analisando contexto seguro…</span> : '')}</div>{m.role === 'assistant' && m.payload && <Payload payload={m.payload}/>}</div></article>)}
+        <section className="chat-scroll" ref={chatScrollRef} onScroll={onChatScroll}>{messages.length === 0 ? <div className="welcome"><div className="welcome-icon"><BrainCircuit size={30}/></div><p className="eyebrow">CHAT · AGENT · WORK</p><h1>Como posso ajudar na sua rede?</h1><p>Investigue incidentes, consulte documentação ou prepare mudanças seguras com a Veronica.</p><div className="suggestions"><button onClick={() => setDraft('/diagnostico Investigue instabilidade de BGP')}> <Activity size={17}/>Diagnosticar incidente<small>/diagnostico</small></button><button onClick={() => setDraft('/simular Verifique impacto da mudança')}> <GitBranch size={17}/>Simular impacto<small>/simular</small></button><button onClick={() => setDraft('/mudanca Planeje alteração de configuração')}> <ClipboardList size={17}/>Planejar mudança<small>/mudanca</small></button></div></div> : <div className="messages"><div className="conversation-heading"><div><small>CONVERSA ATUAL</small><h2>{activeConversation?.title || 'Nova conversa'}</h2></div><span>{messages.length} mensagens</span></div>{messages.map((m, i) => <article key={i} className={`message ${m.role}`}><div className="message-avatar">{m.role === 'user' ? 'A' : <BrainCircuit size={18}/>}</div><div className="message-body"><div className="message-author">{m.role === 'user' ? 'Você' : 'Veronica'}{m.role === 'assistant' && m.payload && m.payload.intent !== 'GREETING' && <span className="epistemic fact">Resposta técnica</span>}{m.profile && <span className={`message-profile ${m.profile}`}>{m.profile.toUpperCase()}</span>}{m.style && <span className="message-style">{({ technical: 'Técnica', natural: 'Natural', mixed: 'Mista', engineer: 'Engenheira' } as Record<ResponseStyle, string>)[m.style]}</span>}</div><div className="message-text">{m.content || (busy && i === messages.length - 1 ? <span className="typing">Analisando contexto seguro…</span> : '')}</div>{m.role === 'assistant' && m.payload && <Payload payload={m.payload}/>}</div></article>)}
           {(thoughts.length > 0 || tools.length > 0) && <details className="thinking" open><summary><BrainCircuit size={16}/> Raciocínio e ferramentas <span>{tools.length} ações</span></summary>{thoughts.map((t,i)=><p key={`t${i}`} className="thought">{t}</p>)}{tools.map((t,i)=><p key={`a${i}`} className="tool-event"><Check size={13}/>{t}</p>)}</details>}
-        </div>}</section>
+        </div>}
+        {showScrollToBottom && messages.length > 0 && <button className="scroll-to-latest" onClick={scrollToLatest}><ArrowDown size={15}/> Última resposta</button>}
+        </section>
         <div className="composer-wrap"><div className="quick-commands"><button onClick={() => setDraft('/diagnostico ')}> /diagnostico</button><button onClick={() => setDraft('/mudanca ')}> /mudanca</button><button onClick={() => setDraft('/simular ')}> /simular</button><span>@equipamento · @documento</span></div><div className="composer"><textarea value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} placeholder="Pergunte sobre sua rede ou cole saídas de comandos…" rows={Math.min(5, Math.max(1, logLines > 14 ? 1 : logLines))}/><div className="composer-footer"><span>{logLines > 14 ? <><FileText size={13}/> [Log: {logLines} linhas] · </> : null}A Veronica consulta dados em modo leitura até receber aprovação.</span><button className="send-button" onClick={() => busy ? aborter.current?.abort() : void send()} disabled={!busy && !draft.trim()}>{busy ? <Square size={15} fill="currentColor"/> : <ArrowUp size={18}/>}</button></div></div><p className="disclaimer">A IA pode cometer erros. Mudanças em rede passam pelo fluxo de aprovação.</p></div>
       </main>
       {artifact && <Canvas artifact={artifact} onClose={() => setArtifact(null)} onSaved={updated => { setArtifact(updated); void refresh(); }}/>}
     </>}
     {error && <button className="error-toast" onClick={() => setError('')}><CircleHelp size={16}/>{error}<span>×</span></button>}
   </div>;
+}
+
+function conversationTitle(prompt: string) {
+  const title = prompt.replace(/^\s*\/\w+\s*/, '').replace(/\s+/g, ' ').trim();
+  return title.length > 52 ? `${title.slice(0, 51).trimEnd()}\u2026` : title || 'Conversa';
 }
 
 function Payload({ payload }: { payload: StructuredAssistantPayload }) {

@@ -74,6 +74,22 @@ body{background:#f5f7f8;color:#293842}
 @media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 .admin-actions{display:flex;align-items:center;gap:8px}
 @media(max-width:560px){.admin-actions{gap:5px}.admin-actions .refresh-button{font-size:0;padding:9px}.admin-actions .refresh-button svg{width:16px;height:16px}}
+
+.chat-scroll{position:relative;scroll-behavior:smooth;scroll-padding-block:16px}
+.messages{padding-top:22px;padding-bottom:88px}
+.conversation-heading{display:flex;align-items:center;justify-content:space-between;gap:16px;margin:0 0 26px;padding:0 0 16px;border-bottom:1px solid var(--line)}
+.conversation-heading small{font:9px 'DM Mono',monospace;letter-spacing:1.2px;color:#78b9ae}
+.conversation-heading h2{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:560px;margin:5px 0 0;color:#e2ebec;font-size:16px;font-weight:600;letter-spacing:-.2px}
+.conversation-heading>span{flex:none;color:#82909b;font-size:10px}
+.message.user .message-text{width:fit-content;max-width:min(680px,100%);margin-left:auto;padding:11px 14px;border:1px solid #2b4149;border-radius:14px 4px 14px 14px;background:#17232b;color:#e0e9ed}
+.message.assistant .message-text{max-width:740px}
+.scroll-to-latest{position:absolute;z-index:2;right:max(22px,calc((100% - 770px)/2));bottom:18px;display:flex;align-items:center;gap:7px;padding:9px 13px;border:1px solid #3e6660;border-radius:999px;background:#19302f;color:#c8eee5;font-size:11px;box-shadow:0 8px 24px #0004;transition:transform .18s ease,background .18s ease}
+.scroll-to-latest:hover{transform:translateY(-2px);background:#21403c}
+:root[data-theme="light"] .conversation-heading h2{color:#273940}
+:root[data-theme="light"] .conversation-heading>span{color:#74848a}
+:root[data-theme="light"] .message.user .message-text{background:#edf4f4;border-color:#dce9e8;color:#33444a}
+:root[data-theme="light"] .scroll-to-latest{background:#e6f4f0;border-color:#c5e2db;color:#315f56;box-shadow:0 8px 24px #173b311c}
+@media(max-width:780px){.messages{padding:18px 15px 82px}.conversation-heading h2{max-width:calc(100vw - 130px);font-size:14px}.scroll-to-latest{right:14px;bottom:12px}}
 .preference-control{display:flex;align-items:center;gap:5px;color:#7a898e;font-size:9px}.preference-control select{max-width:108px;padding:6px 22px 6px 8px;border:1px solid #e1e8e9;border-radius:7px;background:#fff;color:#41565d;font:10px 'DM Sans',Inter,system-ui,sans-serif;outline:none}.preference-control select:focus{border-color:#74aa9e;box-shadow:0 0 0 2px #74aa9e25}:root[data-theme="dark"] .preference-control{color:#a1afb2}:root[data-theme="dark"] .preference-control select{background:#1b282e;border-color:#35454a;color:#d5e0e1}
 @media(max-width:780px){.topbar{height:auto;min-height:54px;flex-wrap:wrap;gap:4px;padding:7px 10px}.topbar>div:first-child{width:100%;min-height:30px}.top-actions{width:100%;gap:5px;justify-content:flex-start}.preference-control{gap:4px}.preference-control span{display:none}.preference-control select{max-width:92px;padding:6px 20px 6px 6px}.mode{padding:6px 7px;font-size:10px}.theme-toggle{margin-left:auto}}
 .message-author{flex-wrap:wrap}.message-profile,.message-style{display:inline-flex;align-items:center;padding:3px 6px;border:1px solid #e3eaea;border-radius:5px;background:#f4f7f7;color:#6c7d80;font:8px 'DM Mono',monospace;letter-spacing:.3px}.message-profile.vrn-fast{background:#eef5fa;border-color:#dbe9f2;color:#527895}.message-profile.vrn-pro{background:#edf7f2;border-color:#dcece3;color:#4b8069}.message-profile.vrn-ultra{background:#f4effa;border-color:#e7dcf3;color:#80659c}.message-style{font-family:'DM Sans',Inter,system-ui,sans-serif;font-size:9px}:root[data-theme="dark"] .message-profile,:root[data-theme="dark"] .message-style{background:#222e33;border-color:#36474c;color:#afbec0}:root[data-theme="dark"] .message-profile.vrn-fast{background:#20313d;border-color:#355064;color:#a5c9e0}:root[data-theme="dark"] .message-profile.vrn-pro{background:#20372e;border-color:#365545;color:#aad7bb}:root[data-theme="dark"] .message-profile.vrn-ultra{background:#30283a;border-color:#4b3c60;color:#d0b9e8}

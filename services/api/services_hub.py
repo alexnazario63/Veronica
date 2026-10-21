@@ -64,6 +64,28 @@ from safety import (
 )
 
 
+_PROTOCOL_ALIASES = {
+    "ospf": ("open shortest path first",),
+    "bgp": ("border gateway protocol",),
+    "mpls": ("multiprotocol label switching",),
+    "rip": ("routing information protocol",),
+    "eigrp": ("enhanced interior gateway routing protocol",),
+    "isis": ("intermediate system to intermediate system",),
+    "isisv6": ("intermediate system to intermediate system",),
+}
+
+
+def _matches_protocol_anchor(text: str, protocols: set[str]) -> bool:
+    text_terms = open_domain_terms(text)
+    for protocol in protocols:
+        if protocol in text_terms:
+            return True
+        for alias in _PROTOCOL_ALIASES.get(protocol, ()):
+            if set(open_domain_terms(alias)).issubset(text_terms):
+                return True
+    return False
+
+
 class ConversationService:
     """
     Gerencia sessões conversacionais com persistência estruturada em banco de dados,
@@ -592,6 +614,8 @@ class ChatService:
             r"\b(integrar isso|fazer isso|usar isso|aplicar isso|com isso|sobre isso)\b",
             r"\b(e no (cisco|huawei|juniper|mikrotik))\b",
             r"\b(e o (bgp|ospf|mpls))\b",
+            r"\b(me refiro|refiro-me|quero dizer|quis dizer|estou falando|falo de)\b",
+            r"\b(apenas|somente|exclusivamente)\b",
         ])
 
         return {
@@ -1607,7 +1631,18 @@ class ChatService:
 
             rag_res = self.rag.search(search_query, top_k=4)
             local_results = rag_res.get("results", [])
-            local_candidates = [item for item in local_results if float(item.get("query_coverage", 0.0)) >= 0.35]
+            protocol_terms = open_domain_terms(search_query) & {"ospf", "bgp", "mpls", "rip", "eigrp", "isis", "isisv6"}
+            local_candidates = [
+                item for item in local_results
+                if float(item.get("query_coverage", 0.0)) >= 0.35
+                and (
+                    not protocol_terms
+                    or _matches_protocol_anchor(
+                        f"{item.get('document', {}).get('title', '')} {item.get('document', {}).get('feature', '')}",
+                        protocol_terms,
+                    )
+                )
+            ]
             research_bundle: Dict[str, Any] = {}
             web_results: List[Dict[str, Any]] = []
             web_synthesis: Dict[str, Any] = {}
@@ -1799,7 +1834,7 @@ class ChatService:
                 )
 
             formatted_markdown = (
-                + (f"**Diagnóstico:** {diagnosis_summary}\n\n" if diagnosis_summary else "")
+                (f"**Diagnóstico:** {diagnosis_summary}\n\n" if diagnosis_summary else "")
                 + (f"{epistemic_text}\n\n" if epistemic_text else "")
                 + (f"**Comandos de verificação:**\n```cli\n{safe_cmds_fmt}\n```\n\n" if safe_cmds else "")
                 + remediation_text
@@ -1868,35 +1903,19 @@ class ChatService:
             model_profile=model_profile,
             response_style=response_style,
         )
-        emitted = 0
-        for item in self.generator.stream_generate(
-            prompt=f"Pergunta: {message_text}",
-            gen_cfg=GenerationConfig(max_new_tokens={"vrn-fast": 16, "vrn-pro": 32, "vrn-ultra": 64}.get(model_profile, 32), greedy=True),
-            should_cancel=lambda: self._cancel_flags.get(conversation_id, False),
-        ):
-            emitted += 1
+        # Stream the finalized answer. Generating a second, unrelated sequence
+        # here exposed raw tokenizer output (often repeated single letters) in
+        # the chat before the completed response replaced it.
+        chunks = re.findall(r"\S+\s*|\s+", assistant_msg["content"])
+        for step, chunk in enumerate(chunks, start=1):
+            if self._cancel_flags.get(conversation_id, False):
+                break
             yield {
                 "type": "token",
-                "step": int(item["step"]),
-                "token_id": int(item["token_id"]),
-                "token": str(item["token_text"]),
-                "token_text": str(item["token_text"]),
-                "confidence": round(float(item["confidence"]), 4),
+                "step": step,
+                "token": chunk,
+                "token_text": chunk,
             }
-
-        if emitted == 0:
-            words = assistant_msg["content"].split()[:12]
-            for idx, word in enumerate(words, start=1):
-                if self._cancel_flags.get(conversation_id, False):
-                    break
-                yield {
-                    "type": "token",
-                    "step": idx,
-                    "token_id": idx,
-                    "token": word + " ",
-                    "token_text": word + " ",
-                    "confidence": 0.95,
-                }
 
         yield {
             "type": "complete",
@@ -2559,6 +2578,42 @@ class VeronicaPlatformHub:
 
         async def model_step(user_message: str, history: List[Dict[str, Any]],
                              evidence: List[Dict[str, Any]]) -> Dict[str, Any]:
+            def is_degenerate(text: Any) -> bool:
+                value = " ".join(str(text or "").split())
+                return bool(re.fullmatch(r"(?:[^\W\d_]\s*){4,}", value, flags=re.UNICODE))
+
+            async def research_fallback() -> Dict[str, Any]:
+                if self.chat_service._classify_intent(user_message, None) == "GREETING":
+                    return {"thought": "", "tool_calls": [], "answer": "Olá! Como posso ajudar?"}
+                try:
+                    research_query = user_message
+                    clarification = re.search(r"\b(me refiro|refiro-me|quis dizer|quero dizer|somente|apenas|exclusivamente)\b", user_message, re.I)
+                    previous_user = next((
+                        str(item.get("content", "")) for item in reversed(history[:-1])
+                        if item.get("role") == "user" and item.get("content")
+                    ), "")
+                    if clarification and previous_user:
+                        research_query = f"{previous_user} {user_message}"
+                    research = await asyncio.to_thread(self.research_open_domain, research_query, 5)
+                    synthesis = research.get("synthesis", {})
+                    answer = str(synthesis.get("answer", "")).strip()
+                    if answer and not is_degenerate(answer):
+                        sources = research.get("sources", [])
+                        links = [
+                            f"[{item.get('title') or 'Fonte'}]({item.get('url')})"
+                            for item in sources[:3] if item.get("url")
+                        ]
+                        if links:
+                            answer += "\n\nFontes: " + " · ".join(links)
+                        return {"thought": "", "tool_calls": [], "answer": answer}
+                except Exception:
+                    import logging
+                    logging.getLogger(__name__).exception("Open-domain fallback research failed")
+                return {
+                    "thought": "", "tool_calls": [],
+                    "answer": "Não consegui gerar uma resposta confiável agora. Tente novamente em instantes ou reformule a pergunta.",
+                }
+
             preferences = next((item.get("response_preferences", {}) for item in evidence
                                 if isinstance(item, dict) and isinstance(item.get("response_preferences"), dict)), {})
             technical_evidence = [item for item in evidence if not (isinstance(item, dict) and "response_preferences" in item)]
@@ -2629,12 +2684,14 @@ class VeronicaPlatformHub:
             try:
                 payload = json.loads(output)
             except (ValueError, TypeError):
-                return {"answer": output or "Não consegui formular uma resposta estruturada."}
+                return await research_fallback()
             if not isinstance(payload, dict):
-                return {"answer": output}
+                return await research_fallback()
             answer = payload.get("answer", "")
-            thought = payload.get("thought", "")
             raw_calls = payload.get("tool_calls", [])
+            if is_degenerate(answer) or (not str(answer).strip() and not raw_calls):
+                return await research_fallback()
+            thought = payload.get("thought", "")
             if not isinstance(raw_calls, list) or len(raw_calls) > 3:
                 return {"answer": str(answer) or "A proposta de ferramenta não passou pela validação."}
             calls: List[Dict[str, Any]] = []
@@ -2646,7 +2703,10 @@ class VeronicaPlatformHub:
                 if not isinstance(arguments, dict):
                     return {"answer": str(answer) or "Os argumentos da ferramenta são inválidos."}
                 calls.append({"id": uuid.uuid4().hex, "name": raw_call["name"], "arguments": arguments})
-            return {"thought": str(thought)[:2000], "tool_calls": calls, "answer": str(answer)}
+            return {
+                "thought": "" if is_degenerate(thought) else str(thought)[:2000],
+                "tool_calls": calls, "answer": str(answer),
+            }
 
         class UserScopedChangeControl:
             def create_change_plan_stages_1_to_5(inner_self, **args: Any) -> Dict[str, Any]:
@@ -2745,6 +2805,7 @@ class VeronicaPlatformHub:
         domain = classify_domain(query)
         raw_results = search_live_web_and_rfc(query, max_results=max_results, timeout=3.5)
         query_terms = open_domain_terms(query)
+        explicit_protocols = query_terms & {"ospf", "bgp", "mpls", "rip", "eigrp", "isis", "isisv6"}
         normalized: List[Dict[str, Any]] = []
         for result in raw_results:
             url = str(result.get("url", "")).strip()
@@ -2762,8 +2823,9 @@ class VeronicaPlatformHub:
                 "authority_score": trust["authority_score"], "relevance": round(overlap, 3),
                 "retrieval_score": round(overlap * 0.72 + float(trust["authority_score"]) * 0.28, 4),
             })
+            result["_protocol_match"] = not explicit_protocols or _matches_protocol_anchor(title, explicit_protocols)
             normalized.append(result)
-        normalized.sort(key=lambda item: (item["retrieval_score"], item["relevance"]), reverse=True)
+        normalized.sort(key=lambda item: (item["_protocol_match"], item["retrieval_score"], item["relevance"]), reverse=True)
 
         cached_by_url = {
             doc.source_uri: doc for doc in self.rag.documents.values()
@@ -2791,11 +2853,17 @@ class VeronicaPlatformHub:
             if fetched.get("url"):
                 item["url"] = str(fetched["url"])
 
+        if explicit_protocols:
+            normalized = [
+                item for item in normalized
+                if _matches_protocol_anchor(item["title"], explicit_protocols)
+            ]
+
         for item in normalized:
             overlap = len(query_terms & open_domain_terms(f"{item['title']} {item['content'][:12000]}")) / max(1, len(query_terms))
             item["relevance"] = round(overlap, 3)
             item["retrieval_score"] = round(overlap * 0.68 + float(item["authority_score"]) * 0.22 + (0.10 if item["full_page"] else 0.0), 4)
-        normalized.sort(key=lambda item: (item["retrieval_score"], item["relevance"]), reverse=True)
+        normalized.sort(key=lambda item: (item.get("_protocol_match", True), item["retrieval_score"], item["relevance"]), reverse=True)
         normalized = normalized[:max_results]
 
         today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
