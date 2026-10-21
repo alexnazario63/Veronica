@@ -11,8 +11,11 @@ from __future__ import annotations
 from collections import Counter
 import json
 from pathlib import Path
-import re
-from typing import Any, Dict, Iterable, List, Optional, Tuple, Union
+try:
+    import regex as re
+except ImportError:  # pragma: no cover - dependency is declared by the project
+    import re
+from typing import Dict, Iterable, List, Optional, Union
 
 
 SPECIAL_TOKENS: List[str] = [
@@ -26,7 +29,12 @@ SPECIAL_TOKENS: List[str] = [
     "<fact>",
     "<infer>",
     "<hypo>",
+    "[SYSTEM]", "[USER]", "[ASSISTANT]", "[THOUGHT]", "[/THOUGHT]",
+    "[TOOL_CALL]", "[/TOOL_CALL]", "[TOOL_RESULT]", "[/TOOL_RESULT]",
+    "[ARTIFACT]", "[/ARTIFACT]", "[CLAIM:FACT]", "[CLAIM:INFERENCE]",
+    "[CLAIM:HYPOTHESIS]",
 ]
+NETWORK_ATOM_BUCKETS = [f"[NET_ATOM_{index:04d}]" for index in range(64)]
 
 BASE_NETWORK_VOCAB: List[str] = [
     # Protocolos e tecnologias
@@ -88,13 +96,28 @@ CHAR_TOKENS: List[str] = list(
     "áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇ"
 )
 
+SPECIAL_PATTERN = "|".join(re.escape(token) for token in sorted(SPECIAL_TOKENS, key=len, reverse=True))
+# Keep network atoms whole, including IPv6 (optionally with CIDR), ASNs,
+# colon/dotted MACs and common vendor interface identifiers.
 TOKEN_PATTERN = re.compile(
-    r"<\w+>|<\/\w+>"
-    r"|\b\d{1,3}(?:\.\d{1,3}){3}(?:\/\d{1,2})?\b"  # IPv4 / CIDR
-    r"|\b(?:[A-Za-z]+(?:-\w+)+)\b"                  # Palavras hifenizadas técnicas (ios-xr, route-policy)
-    r"|[A-Za-zÀ-ÿ0-9_]+"                            # Palavras e identificadores
-    r"|\s+"                                         # Espaços e quebras de linha
-    r"|[^\sA-Za-zÀ-ÿ0-9_]"                          # Pontuação individual
+    rf"{SPECIAL_PATTERN}"
+    r"|<\/?\w+>"
+    r"|(?<![\w:])(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?(?![\w.])"
+    r"|(?<![\w:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?:/\d{1,3})?(?![\w:])"
+    r"|\bAS\d{1,10}\b"
+    r"|\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"
+    r"|\b(?:Gi|GigabitEthernet|Te|TenGigabitEthernet|Eth|Ethernet|Hu|HundredGigE|Fa|FastEthernet|ge-|xe-|et-|Ethernet|ether)"
+    r"[A-Za-z0-9._/: -]*\d(?:[A-Za-z0-9._/:-]*\d)?"
+    r"|\b(?:[A-Za-z]+(?:-[\w]+)+)\b"
+    r"|[A-Za-zÀ-ÿ0-9_]+|\s+|[^\sA-Za-zÀ-ÿ0-9_]"
+)
+NETWORK_ATOM_PATTERN = re.compile(
+    r"^(?:(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?"
+    r"|(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?:/\d{1,3})?"
+    r"|AS\d{1,10}"
+    r"|(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}"
+    r"|(?:Gi|GigabitEthernet|Te|TenGigabitEthernet|Eth|Ethernet|Hu|HundredGigE|Fa|FastEthernet|ge-|xe-|et-|ether)[A-Za-z0-9._/: -]*\d(?:[A-Za-z0-9._/:-]*\d)?)$",
+    re.IGNORECASE,
 )
 
 
@@ -116,6 +139,13 @@ class TechnicalTokenizer:
 
         for tok in all_initial:
             self._add_token(tok)
+        # The transformer reserves 64 output IDs beyond the fixed tokenizer
+        # vocabulary. Use those slots for intact addresses without resizing it.
+        first_slot = len(self.token_to_id)
+        for offset, token in enumerate(NETWORK_ATOM_BUCKETS):
+            self.id_to_token[first_slot + offset] = token
+        self._network_atom_ids = list(range(first_slot, first_slot + len(NETWORK_ATOM_BUCKETS)))
+        self._network_atom_next = 0
 
     def _add_token(self, token: str) -> int:
         if token not in self.token_to_id:
@@ -179,6 +209,23 @@ class TechnicalTokenizer:
         for piece in TOKEN_PATTERN.findall(text):
             if piece in self.token_to_id:
                 ids.append(self.token_to_id[piece])
+            elif NETWORK_ATOM_PATTERN.fullmatch(piece):
+                # Preserve exact atoms without changing the model vocabulary size:
+                # assign each to a pre-reserved embedding slot for this instance.
+                while self._network_atom_next < len(self._network_atom_ids):
+                    token_id = self._network_atom_ids[self._network_atom_next]
+                    self._network_atom_next += 1
+                    if self.id_to_token[token_id].startswith("[NET_ATOM_"):
+                        placeholder = self.id_to_token[token_id]
+                        self.token_to_id.pop(placeholder, None)
+                        self.id_to_token[token_id] = piece
+                        self.token_to_id[piece] = token_id
+                        ids.append(token_id)
+                        break
+                else:
+                    # Exhaustion is extraordinarily unlikely for normal technical
+                    # corpora; character fallback remains lossless in that case.
+                    ids.extend(self.token_to_id.get(ch, self.unk_id) for ch in piece)
             elif piece.lower() in self.token_to_id and piece.islower():
                 ids.append(self.token_to_id[piece.lower()])
             else:
@@ -198,7 +245,7 @@ class TechnicalTokenizer:
         pieces: List[str] = []
         for idx in token_ids:
             tok = self.id_to_token.get(int(idx), "<unk>")
-            if tok in special_set:
+            if tok in special_set or tok.startswith("[NET_ATOM_"):
                 continue
             pieces.append(tok)
         return "".join(pieces)
@@ -221,4 +268,11 @@ class TechnicalTokenizer:
         tokenizer.id_to_token.clear()
         for tok in payload["tokens"]:
             tokenizer._add_token(tok)
+        first_slot = len(tokenizer.token_to_id)
+        for offset, token in enumerate(NETWORK_ATOM_BUCKETS):
+            tokenizer.id_to_token[first_slot + offset] = token
+        tokenizer._network_atom_ids = list(
+            range(first_slot, first_slot + len(NETWORK_ATOM_BUCKETS))
+        )
+        tokenizer._network_atom_next = 0
         return tokenizer

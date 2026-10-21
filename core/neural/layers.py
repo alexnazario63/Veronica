@@ -5,11 +5,11 @@ Inclui Parameter, Module, Neuron, Linear, Embedding, LayerNorm, RMSNorm, Dropout
 
 from __future__ import annotations
 
-from typing import Any, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Dict, List, Optional
 import numpy as np
 
 from core.neural.tensor import Tensor
-from core.neural.init import xavier_uniform_, normal_, zeros_, ones_
+from core.neural.init import xavier_uniform_, normal_
 
 
 class Parameter(Tensor):

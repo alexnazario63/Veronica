@@ -12,11 +12,16 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
 import io
+import math
 import json
 from pathlib import Path
 import struct
-from typing import Any, Dict, List, Optional, Set, Tuple, Union
+import unicodedata
+from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
+
+
+_MEMORY_STOP_WORDS = {"qual", "quais", "como", "quando", "onde", "para", "sobre", "com", "uma", "the", "what", "with", "from", "que", "por", "das", "dos", "and", "you", "your", "is", "are"}
 
 
 @dataclass
@@ -555,7 +560,7 @@ class MemorySystem:
 
         # Se houver conceitos associados, ativa/cria na memória semântica
         for c in concepts:
-            self._touch_or_create_concept(c, category="EXPERIENCE", description=experience_summary)
+            self._touch_or_create_concept(c, category="EXPERIENCE", description="Concept associated with a conversation episode.")
 
         self.auto_save_binary()
         return rec
@@ -565,37 +570,99 @@ class MemorySystem:
         query: str,
         modality: Optional[str] = None,
         limit: int = 10,
+        user_id: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
-        """Recupera memórias episódicas relevantes para a reflexão ou conversa."""
-        q_low = query.lower()
-        results: List[Tuple[float, EpisodicMemoryRecord]] = []
+        """Rank relevant episodes with normalized lexical and phrase overlap, scoped by owner."""
+        import re
 
-        for rec in self.episodic_memories.values():
-            if modality and rec.modality != modality:
+        def normalized_tokens(text: str) -> List[str]:
+            normalized = "".join(c for c in unicodedata.normalize("NFD", text.casefold()) if unicodedata.category(c) != "Mn")
+            return [token for token in re.findall(r"[\w-]{3,}", normalized) if token not in _MEMORY_STOP_WORDS]
+
+        query_tokens = normalized_tokens(query)
+        if not query_tokens:
+            recent = [
+                rec for rec in self.episodic_memories.values()
+                if (not modality or rec.modality == modality)
+                and (not user_id or rec.perceptual_details.get("user_id") == user_id)
+            ]
+            recent.sort(key=lambda rec: rec.timestamp, reverse=True)
+            return [asdict(rec) for rec in recent[:limit]]
+
+        eligible = [
+            rec for rec in self.episodic_memories.values()
+            if (not modality or rec.modality == modality)
+            and (not user_id or rec.perceptual_details.get("user_id") == user_id)
+        ]
+        tokenized = {
+            rec.memory_id: normalized_tokens(
+                rec.experience_summary + " " + json.dumps(rec.perceptual_details, ensure_ascii=False)
+                + " " + " ".join(rec.associated_concepts)
+            ) for rec in eligible
+        }
+        document_frequency: Dict[str, int] = {}
+        for tokens in tokenized.values():
+            for token in set(tokens):
+                document_frequency[token] = document_frequency.get(token, 0) + 1
+
+        query_set = set(query_tokens)
+        query_bigrams = set(zip(query_tokens, query_tokens[1:]))
+        scored: List[Tuple[float, EpisodicMemoryRecord]] = []
+        for rec in eligible:
+            tokens = tokenized[rec.memory_id]
+            words = set(tokens)
+            overlap = query_set & words
+            if not overlap:
                 continue
-            score = 0.0
-            if q_low in rec.experience_summary.lower():
-                score += 3.0
-            for c in rec.associated_concepts:
-                if c.lower() in q_low or q_low in c.lower():
-                    score += 2.0
-            score += rec.salience * 1.5
-            score += rec.consolidation_level * 1.0
-
-            if score > 1.0:
-                results.append((score, rec))
-
-        # Se não houver correspondência exata por texto, retorna as mais recentes ou salientes
-        if not results:
-            sorted_recent = sorted(
-                self.episodic_memories.values(),
-                key=lambda x: (x.salience, x.timestamp),
-                reverse=True,
+            weighted_overlap = sum(
+                math.log1p(len(eligible) / (1 + document_frequency.get(token, 0)))
+                for token in overlap
             )
-            return [asdict(r) for r in sorted_recent[:limit]]
+            total_query_weight = sum(
+                math.log1p(len(eligible) / (1 + document_frequency.get(token, 0)))
+                for token in query_set
+            ) or 1.0
+            token_score = weighted_overlap / total_query_weight
+            episode_bigrams = set(zip(tokens, tokens[1:]))
+            phrase_score = len(query_bigrams & episode_bigrams) / max(1, len(query_bigrams))
+            exact_phrase = 0.2 if " ".join(query_tokens) in " ".join(tokens) else 0.0
+            score = min(1.0, 0.72 * token_score + 0.2 * phrase_score + exact_phrase + rec.salience * 0.02)
+            scored.append((score, rec))
 
-        results.sort(key=lambda x: x[0], reverse=True)
-        return [asdict(r) for _, r in results[:limit]]
+        scored.sort(key=lambda pair: (pair[0], pair[1].timestamp), reverse=True)
+        output = []
+        for score, record in scored[:limit]:
+            item = asdict(record)
+            item["_relevance"] = round(score, 4)
+            output.append(item)
+        return output
+
+    def forget_conversation(self, conversation_id: str, user_id: str) -> int:
+        """Remove one owner's episodic records for a deleted conversation."""
+        removed = [
+            memory_id for memory_id, record in self.episodic_memories.items()
+            if record.perceptual_details.get("conversation_id") == conversation_id
+            and record.perceptual_details.get("user_id") == user_id
+        ]
+        concepts = {
+            concept.strip().lower().replace(" ", "_")
+            for memory_id in removed
+            for concept in self.episodic_memories[memory_id].associated_concepts
+        }
+        for memory_id in removed:
+            self.episodic_memories.pop(memory_id, None)
+        for concept_id in concepts:
+            node = self.semantic_nodes.get(concept_id)
+            still_used = any(
+                concept_id == concept.strip().lower().replace(" ", "_")
+                for record in self.episodic_memories.values()
+                for concept in record.associated_concepts
+            )
+            if node and node.category == "EXPERIENCE" and not still_used:
+                self.semantic_nodes.pop(concept_id, None)
+                self.semantic_edges = [edge for edge in self.semantic_edges if edge.source_id != concept_id and edge.target_id != concept_id]
+        self.auto_save_binary()
+        return len(removed)
 
     # ==================== Memória Semântica ====================
 

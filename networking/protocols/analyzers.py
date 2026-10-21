@@ -447,7 +447,7 @@ def analyze_protocol_anomalies(
                     f"Subsistema de segurança ({control}) registrou: {detail}."
                 ],
                 "technical_inferences": [
-                    f"Falha de negociação IKE/IPsec, indisponibilidade de servidor AAA (RADIUS/TACACS+) ou violação de política de firewall/segmentação."
+                    "Falha de negociação IKE/IPsec, indisponibilidade de servidor AAA (RADIUS/TACACS+) ou violação de política de firewall/segmentação."
                 ],
                 "hypotheses": [
                     "Divergência de proposta criptográfica Phase1/Phase2, chave compartilhada expirada ou bloqueio na gerência SSH/CoPP."

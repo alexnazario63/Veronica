@@ -7,7 +7,7 @@ penalidade de repetição e suporte a cancelamento em tempo real.
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Callable, Dict, Iterator, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 import numpy as np
 
 from core.tokenizer.tokenizer import TechnicalTokenizer
@@ -26,6 +26,34 @@ class GenerationConfig:
     seed: int = 42
 
 
+class PrefixKVCache:
+    """Small exact-prefix cache for model prompt states and final prompt logits."""
+
+    def __init__(self, max_entries: int = 32) -> None:
+        from collections import OrderedDict
+        self.max_entries = max(1, int(max_entries))
+        self._entries: Any = OrderedDict()
+
+    def get(self, token_ids: List[int]) -> Optional[Tuple[List[Tuple[np.ndarray, np.ndarray]], np.ndarray]]:
+        key = tuple(token_ids)
+        entry = self._entries.get(key)
+        if entry is None:
+            return None
+        self._entries.move_to_end(key)
+        kvs, logits = entry
+        return ([(k.copy(), v.copy()) for k, v in kvs], logits.copy())
+
+    def put(self, token_ids: List[int], kvs: List[Tuple[np.ndarray, np.ndarray]], logits: np.ndarray) -> None:
+        key = tuple(token_ids)
+        self._entries[key] = ([(k.copy(), v.copy()) for k, v in kvs], logits.copy())
+        self._entries.move_to_end(key)
+        while len(self._entries) > self.max_entries:
+            self._entries.popitem(last=False)
+
+    def clear(self) -> None:
+        self._entries.clear()
+
+
 class AutoregressiveGenerator:
     """
     Executa decodificação autoregressiva usando o modelo neural próprio VeronicaTransformer.
@@ -38,6 +66,27 @@ class AutoregressiveGenerator:
     ) -> None:
         self.model = model
         self.tokenizer = tokenizer
+        self.prefix_cache = PrefixKVCache()
+
+    def _active_tool_json_prefix(
+        self, prompt_ids: List[int], generated_ids: List[int]
+    ) -> Optional[str]:
+        """Return the open tool-call body, if the latest call has not closed."""
+        call_id = self.tokenizer.token_to_id.get("[TOOL_CALL]")
+        close_id = self.tokenizer.token_to_id.get("[/TOOL_CALL]")
+        if call_id is None:
+            return None
+        ids = prompt_ids + generated_ids
+        call_pos = next((i for i in range(len(ids) - 1, -1, -1) if ids[i] == call_id), None)
+        if call_pos is None:
+            return None
+        close_pos = next(
+            (i for i in range(len(ids) - 1, call_pos, -1) if ids[i] == close_id),
+            None,
+        )
+        if close_pos is not None:
+            return None
+        return self.tokenizer.decode(ids[call_pos + 1 :], skip_special_tokens=False)
 
     def _sample_next_token(
         self,
@@ -101,6 +150,7 @@ class AutoregressiveGenerator:
         gen_cfg: Optional[GenerationConfig] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
         capture_diagnostics: bool = True,
+        tool_schema: Optional[Dict[str, Any]] = None,
     ) -> Iterator[Dict[str, object]]:
         """
         Gera tokens progressivamente, emitindo cada fragmento decodificado e sua probabilidade.
@@ -120,25 +170,42 @@ class AutoregressiveGenerator:
 
         generated_ids: List[int] = []
         past_kvs = None
+        cached_prefix = self.prefix_cache.get(prompt_ids) if cfg.use_cache else None
+        first_logits: Optional[np.ndarray] = None
+        if cached_prefix is not None:
+            past_kvs, first_logits = cached_prefix
 
         for step in range(cfg.max_new_tokens):
             if should_cancel is not None and should_cancel():
                 break
 
-            if cfg.use_cache and past_kvs is not None:
-                step_input = np.array([[generated_ids[-1]]], dtype=np.int64)
+            if first_logits is not None:
+                next_logits = first_logits
+                first_logits = None
             else:
-                full_seq = (prompt_ids + generated_ids)[-self.model.config.max_seq_len :]
-                step_input = np.array([full_seq], dtype=np.int64)
+                if cfg.use_cache and past_kvs is not None:
+                    step_input = np.array([[generated_ids[-1]]], dtype=np.int64)
+                else:
+                    full_seq = (prompt_ids + generated_ids)[-self.model.config.max_seq_len :]
+                    step_input = np.array([full_seq], dtype=np.int64)
 
-            logits, past_kvs = self.model.forward(
-                step_input,
-                past_kvs=past_kvs if cfg.use_cache else None,
-                use_cache=cfg.use_cache,
-                capture_diagnostics=(capture_diagnostics and step == 0),
-            )
-
-            next_logits = logits.data[0, -1, :]
+                logits, past_kvs = self.model.forward(
+                    step_input,
+                    past_kvs=past_kvs if cfg.use_cache else None,
+                    use_cache=cfg.use_cache,
+                    capture_diagnostics=(capture_diagnostics and step == 0),
+                )
+                next_logits = logits.data[0, -1, :]
+                if step == 0 and cfg.use_cache and past_kvs is not None:
+                    self.prefix_cache.put(prompt_ids, past_kvs, next_logits)
+            # Tool calls switch immediately into schema-constrained JSON mode.
+            if tool_schema is not None:
+                json_prefix = self._active_tool_json_prefix(prompt_ids, generated_ids)
+                if json_prefix is not None:
+                    from core.inference.constrained_json import ConstrainedJSONDecoder
+                    next_logits = ConstrainedJSONDecoder(
+                        self.tokenizer, tool_schema
+                    ).mask_logits(next_logits, json_prefix)
             next_id, token_prob = self._sample_next_token(
                 next_logits, generated_ids, cfg, rng
             )
@@ -154,18 +221,28 @@ class AutoregressiveGenerator:
                 "token_text": token_str,
                 "confidence": token_prob,
             }
+            # A completed constrained call is a complete model action. Stopping
+            # here prevents unconstrained tokens from being appended afterward.
+            if next_id == self.tokenizer.token_to_id.get("[/TOOL_CALL]"):
+                break
 
     def generate_text(
         self,
         prompt: str,
         gen_cfg: Optional[GenerationConfig] = None,
         should_cancel: Optional[Callable[[], bool]] = None,
+        tool_schema: Optional[Dict[str, Any]] = None,
     ) -> Dict[str, object]:
         pieces: List[str] = []
         confidences: List[float] = []
         token_ids: List[int] = []
 
-        for item in self.stream_generate(prompt, gen_cfg=gen_cfg, should_cancel=should_cancel):
+        for item in self.stream_generate(
+            prompt,
+            gen_cfg=gen_cfg,
+            should_cancel=should_cancel,
+            tool_schema=tool_schema,
+        ):
             pieces.append(str(item["token_text"]))
             confidences.append(float(item["confidence"]))
             token_ids.append(int(item["token_id"]))

@@ -6,25 +6,19 @@ convergência de otimizadores (SGD e AdamW), clipping e integridade SHA-256 de c
 
 from pathlib import Path
 import numpy as np
-import pytest
 
 from core.neural import (
     Tensor,
     Neuron,
     Linear,
-    Embedding,
     LayerNorm,
     RMSNorm,
     Sequential,
-    ReLU,
     GELU,
-    Sigmoid,
     Tanh,
-    Softmax,
     MSELoss,
     CrossEntropyLoss,
     BinaryCrossEntropyLoss,
-    SGD,
     AdamW,
     clip_grad_norm_,
     save_checkpoint,

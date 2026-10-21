@@ -10,14 +10,14 @@ Orquestra o crescimento humanoide:
 
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass, field
+from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import uuid
 
-from core.development.neurogenesis import DynamicNeuron, NeurogenesisCircuit, NeurogenesisEngine
+from core.development.neurogenesis import DynamicNeuron, NeurogenesisEngine
 from core.development.memory_system import MemorySystem
 from core.development.perception import (
     ReadingAnalysisResult,

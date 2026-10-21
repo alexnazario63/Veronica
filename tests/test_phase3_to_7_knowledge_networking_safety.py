@@ -9,10 +9,16 @@ Testes Automatizados das Fases 3 a 7 e Critérios de Aceitação de Segurança (
 - Bloqueio de Prompt Injection documental, vazamento de credenciais e aprovação por voz
 """
 
+import base64
+from datetime import datetime, timezone
 import io
+from pathlib import Path
+import json
 import zipfile
 import zlib
 import pytest
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PrivateKey
 
 from knowledge import (
     KnowledgeIngestor,
@@ -38,6 +44,30 @@ from safety import (
     TamperEvidentAuditLog,
     DeterministicChangeController,
 )
+from safety.change_control.blast_lock import BlastRadiusLock
+
+
+def _signed_approval(rbac: RBACPolicyManager, plan: dict[str, object]) -> dict[str, str]:
+    signer = Ed25519PrivateKey.generate()
+    public_key = signer.public_key().public_bytes(
+        serialization.Encoding.PEM, serialization.PublicFormat.SubjectPublicKeyInfo
+    ).decode("ascii")
+    rbac.register_approval_public_key("usr-app-01", public_key)
+    timestamp = datetime.now(timezone.utc).isoformat()
+    payload = json.dumps(
+        {
+            "operator_id": "usr-app-01",
+            "artifact_sha256_hash": plan["plan_hash"],
+            "maintenance_window_id": plan["maintenance_window"],
+            "timestamp": timestamp,
+        },
+        sort_keys=True,
+        separators=(",", ":"),
+    ).encode("utf-8")
+    return {
+        "signature_ed25519": base64.b64encode(signer.sign(payload)).decode("ascii"),
+        "approval_timestamp": timestamp,
+    }
 
 
 
@@ -142,7 +172,7 @@ def test_diagnostics_11_steps_complete_and_incomplete_data() -> None:
     assert partial_report["confidence"] < 0.60
 
 
-def test_10_stage_change_control_security_and_rollback() -> None:
+def test_10_stage_change_control_security_and_rollback(tmp_path: Path) -> None:
     inv = create_default_network_inventory()
     adapter = DigitalTwinNetworkAdapter(inv)
     topo = NetworkTopologyGraph(inv)
@@ -153,9 +183,13 @@ def test_10_stage_change_control_security_and_rollback() -> None:
     # Verifica cofre de credenciais
     ref = vault.store_credential("NE8000-CORE-01", "netadmin", "MyPrivateSSHPass#99")
     pub = vault.get_public_metadata(ref)
-    assert pub["secret_value"] == "[PROTECTED_IN_VAULT]"
+    assert "ciphertext" not in pub
+    assert vault.retrieve_credential(ref) == "MyPrivateSSHPass#99"
 
-    ctrl = DeterministicChangeController(adapter=adapter, topology=topo, rbac=rbac, audit_log=audit)
+    ctrl = DeterministicChangeController(
+        adapter=adapter, topology=topo, rbac=rbac, audit_log=audit,
+        blast_radius_lock=BlastRadiusLock(database_path=tmp_path / "safety-locks.sqlite3"),
+    )
 
     # 1. Bloqueio de perda de sessão administrativa (shutdown na interface de gerência)
     with pytest.raises(ValueError, match="ADMIN_SESSION_LOCKOUT_RISK"):
@@ -203,6 +237,7 @@ def test_10_stage_change_control_security_and_rollback() -> None:
         confirmed_plan_hash=plan["plan_hash"],
         confirmed_maintenance_window=plan["maintenance_window"],
         approval_channel="EXPLICIT_WEB_APPROVAL",
+        **_signed_approval(rbac, plan),
     )
     token = approved["stages"]["stage_6_approval"]["approval_token"]
 
@@ -214,7 +249,28 @@ def test_10_stage_change_control_security_and_rollback() -> None:
 
     # Restaura config ao estado do baseline e testa execução + pós-validação bem-sucedida
     inv["NE8000-CORE-01"]["running_config"] = orig_cfg
-    completed = ctrl.execute_change_stages_7_to_10(change_id, "usr-eng-01", approval_token=token)
+    with pytest.raises(RuntimeError, match="CHANGE_STAGE_INVALID"):
+        ctrl.execute_change_stages_7_to_10(change_id, "usr-eng-01", approval_token=token)
+    retry_plan = ctrl.create_change_plan_stages_1_to_5(
+        requester_user_id="usr-eng-01",
+        device_id="NE8000-CORE-01",
+        title="Fresh baseline after concurrent update",
+        proposed_commands=[
+            "system-view", "bgp 65001", "peer 10.0.0.2 connect-interface Loopback0",
+            "peer 10.0.0.2 ebgp-max-hop 2", "commit trial 120",
+        ],
+    )
+    retry_approved = ctrl.approve_change_stage_6(
+        change_id=retry_plan["change_id"],
+        approver_user_id="usr-app-01",
+        confirmed_plan_hash=retry_plan["plan_hash"],
+        confirmed_maintenance_window=retry_plan["maintenance_window"],
+        **_signed_approval(rbac, retry_plan),
+    )
+    completed = ctrl.execute_change_stages_7_to_10(
+        retry_plan["change_id"], "usr-eng-01",
+        approval_token=retry_approved["stages"]["stage_6_approval"]["approval_token"],
+    )
     assert completed["status"] == "COMPLETED_VERIFIED"
     assert inv["NE8000-CORE-01"]["bgp_peers"][0]["state"] == "Established"
 
@@ -231,6 +287,7 @@ def test_10_stage_change_control_security_and_rollback() -> None:
         approver_user_id="usr-app-01",
         confirmed_plan_hash=plan_xr["plan_hash"],
         confirmed_maintenance_window=plan_xr["maintenance_window"],
+        **_signed_approval(rbac, plan_xr),
     )
     tok_xr = app_xr["stages"]["stage_6_approval"]["approval_token"]
     rb_exec = ctrl.execute_change_stages_7_to_10(plan_xr["change_id"], "usr-eng-01", approval_token=tok_xr)

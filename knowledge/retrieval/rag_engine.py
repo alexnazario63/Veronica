@@ -67,6 +67,14 @@ class HybridRAGEngine:
         self.doc_freqs: Counter[str] = Counter()
         self.doc_embeddings: Dict[str, np.ndarray] = {}
         self.avg_doc_len: float = 1.0
+        # Inverted postings keep updates incremental. Optional native indexes are
+        # used when installed; the Python path remains dependency-free.
+        self.postings: Dict[str, set[str]] = {}
+        self._vector_index: Any = None
+        self._bm25s_index: Any = None
+        self._bm25s_ids: List[str] = []
+        self._vector_ids: Dict[int, str] = {}
+        self._next_vector_id = 0
 
         docs_to_load = list(initial_docs) if initial_docs is not None else OFFICIAL_INITIAL_DOCUMENTS
         for doc in docs_to_load:
@@ -93,18 +101,42 @@ class HybridRAGEngine:
                 self.doc_freqs[unique_t] += 1
         self.avg_doc_len = float(total_len) / max(active_count, 1)
 
-    def add_document(self, doc: KnowledgeDocument, recompute_stats: bool = True) -> None:
+    def add_document(self, doc: KnowledgeDocument, recompute_stats: bool = True, compute_embedding: bool = True) -> None:
+        old_tokens = self.doc_tokens.get(doc.doc_id, ())
+        for token in set(old_tokens):
+            self.postings.get(token, set()).discard(doc.doc_id)
         self.documents[doc.doc_id] = doc
+        self._bm25s_index = None  # lazily rebuild after incremental updates
         searchable_text = (
             f"{doc.title} {doc.vendor} {doc.family_model} {doc.os_name} "
             f"{doc.version_build} {doc.feature} {doc.content} {' '.join(doc.extracted_commands)}"
         )
         self.doc_tokens[doc.doc_id] = _tokenize_for_bm25(searchable_text)
-        emb = self._compute_doc_embedding(doc)
+        for token in set(self.doc_tokens[doc.doc_id]):
+            self.postings.setdefault(token, set()).add(doc.doc_id)
+        emb = self._compute_doc_embedding(doc) if compute_embedding else None
         if emb is not None:
             self.doc_embeddings[doc.doc_id] = emb
+            self._index_embedding(doc.doc_id, emb)
+        else:
+            self.doc_embeddings.pop(doc.doc_id, None)
         if recompute_stats:
             self._recompute_index_stats()
+
+    def _index_embedding(self, doc_id: str, embedding: np.ndarray) -> None:
+        try:
+            from usearch.index import Index
+            vector = np.asarray(embedding, dtype=np.float32).reshape(-1)
+            if self._vector_index is None:
+                self._vector_index = Index(ndim=len(vector), metric="cos", dtype="f32")
+            label = self._next_vector_id
+            self._next_vector_id += 1
+            self._vector_ids[label] = doc_id
+            self._vector_index.add(label, vector)
+        except (ImportError, TypeError, ValueError):
+            # Small installations and unsupported embedding shapes use exact
+            # cosine scoring below.
+            self._vector_index = None
 
     def refresh_neural_embeddings(self) -> None:
         if self.model is None:
@@ -139,6 +171,34 @@ class HybridRAGEngine:
             score += idf * ((tf * (k1 + 1.0)) / denom)
         return score
 
+    def _candidate_ids(self, query_terms: List[str]) -> set[str]:
+        found: set[str] = set()
+        for term in query_terms:
+            found.update(self.postings.get(term, ()))
+        return found
+
+    def _bm25s_ranking(self, query: str, eligible: set[str]) -> List[str]:
+        """Use bm25s' sparse index when available; retain postings BM25 fallback."""
+        try:
+            import bm25s
+            if self._bm25s_index is None:
+                self._bm25s_ids = [
+                    doc_id for doc_id, doc in self.documents.items()
+                    if not doc.security_quarantined
+                ]
+                corpus = [" ".join(self.doc_tokens.get(doc_id, ())) for doc_id in self._bm25s_ids]
+                retriever = bm25s.BM25()
+                retriever.index(bm25s.tokenize(corpus))
+                self._bm25s_index = retriever
+            query_tokens = bm25s.tokenize([query])
+            indices, _scores = self._bm25s_index.retrieve(query_tokens, k=max(1, len(self._bm25s_ids)))
+            order = indices[0].tolist() if hasattr(indices[0], "tolist") else list(indices[0])
+            return [self._bm25s_ids[int(i)] for i in order if int(i) < len(self._bm25s_ids)
+                    and self._bm25s_ids[int(i)] in eligible]
+        except (ImportError, AttributeError, TypeError, ValueError, IndexError):
+            return sorted(self._candidate_ids(_tokenize_for_bm25(query)) & eligible,
+                           key=lambda d: self._bm25_score(_tokenize_for_bm25(query), d), reverse=True)
+
     def search(
         self,
         query: str,
@@ -154,45 +214,72 @@ class HybridRAGEngine:
             q_ids = self.tokenizer.encode(query, add_bos=True, max_length=self.model.config.max_seq_len)
             query_emb = self.model.encode_sequence_embedding(q_ids)
 
+        # Reciprocal Rank Fusion avoids mixing incomparable BM25 and cosine
+        # scales, and lets lexical and neural retrieval contribute independently.
+        eligible = {
+            doc_id for doc_id, doc in self.documents.items()
+            if not doc.security_quarantined
+            and (not vendor_filter or doc.vendor.lower() == vendor_filter.lower())
+            and (not os_filter or os_filter.lower() in doc.os_name.lower())
+            and (include_obsolete or not doc.is_obsolete)
+        }
+        lexical = self._bm25s_ranking(query, eligible)
+        vector_scores: Dict[str, float] = {}
+        if query_emb is not None:
+            if self._vector_index is not None:
+                try:
+                    hits = self._vector_index.search(np.asarray(query_emb, dtype=np.float32), min(len(eligible), max(top_k * 8, 32)))
+                    for label, distance in zip(hits.keys, hits.distances):
+                        doc_id = self._vector_ids.get(int(label))
+                        if doc_id in eligible:
+                            vector_scores[doc_id] = 1.0 - float(distance)
+                except (AttributeError, TypeError, ValueError):
+                    vector_scores = {}
+            if not vector_scores:
+                for doc_id in eligible:
+                    emb = self.doc_embeddings.get(doc_id)
+                    if emb is not None:
+                        vector_scores[doc_id] = float(np.dot(query_emb, emb))
+        semantic = sorted(vector_scores, key=vector_scores.get, reverse=True)
+        fused: Counter[str] = Counter()
+        rrf_k = 60
+        for ranking in (lexical, semantic):
+            for rank, doc_id in enumerate(ranking, 1):
+                fused[doc_id] += 1.0 / (rrf_k + rank)
+        # Preserve vendor-filter behavior: a filtered vendor can still yield
+        # useful candidates when query wording does not overlap its metadata.
+        if vendor_filter and not fused:
+            fused.update({doc_id: 1.0 / (rrf_k + 1) for doc_id in eligible})
+
         scored_results: List[Dict[str, Any]] = []
         obsolete_warnings: List[str] = []
 
-        for doc_id, doc in self.documents.items():
-            if doc.security_quarantined:
-                continue
-            if vendor_filter and doc.vendor.lower() != vendor_filter.lower():
-                continue
-            if os_filter and os_filter.lower() not in doc.os_name.lower():
-                continue
-            if doc.is_obsolete and not include_obsolete:
-                continue
+        for doc_id in fused:
+            doc = self.documents[doc_id]
 
             bm25 = self._bm25_score(query_terms, doc_id)
-            if bm25 <= 0.0 and not vendor_filter:
-                continue
 
             doc_tok_set = set(self.doc_tokens.get(doc_id, []))
             matched_terms = [t for t in unique_q_terms if t in doc_tok_set]
             missing_terms = [t for t in unique_q_terms if t not in doc_tok_set]
             coverage = (len(matched_terms) / len(unique_q_terms)) if unique_q_terms else 1.0
 
-            vec_sim = 0.0
-            if query_emb is not None and doc_id in self.doc_embeddings:
-                vec_sim = float(np.dot(query_emb, self.doc_embeddings[doc_id]))
-                vec_sim = max(0.0, vec_sim)
+            vec_sim = max(0.0, vector_scores.get(doc_id, 0.0))
 
             official_boost = 1.15 if doc.is_official else 0.90
             obsolete_penalty = 0.65 if doc.is_obsolete else 1.0
             coverage_weight = (0.25 + 0.75 * (coverage ** 2)) if (len(unique_q_terms) >= 2 and not vendor_filter) else 1.0
             combined_score = (
-                (bm25 + 0.4 * vec_sim)
+                fused[doc_id]
                 * doc.reliability_score
                 * official_boost
                 * obsolete_penalty
                 * coverage_weight
             )
 
-            if combined_score > 0.05:
+            # RRF scores are naturally small (about 1/61 for a top-ranked hit),
+            # so a legacy raw-BM25 cutoff silently removed every valid result.
+            if combined_score > 0.0:
                 if doc.is_obsolete:
                     obsolete_warnings.append(
                         f"Documento '{doc.doc_id}' ({doc.os_name} {doc.version_build}) é OBSOLETO; "
@@ -201,6 +288,7 @@ class HybridRAGEngine:
                 scored_results.append(
                     {
                         "score": round(combined_score, 4),
+                        "rrf_score": round(fused[doc_id], 6),
                         "bm25_score": round(bm25, 4),
                         "neural_embedding_similarity": round(vec_sim, 4),
                         "query_coverage": round(coverage, 4),

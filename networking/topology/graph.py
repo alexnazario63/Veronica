@@ -5,8 +5,12 @@ Mantém os nós, enlaces, dependências de serviços e calcula o Raio de Impacto
 
 from __future__ import annotations
 
-import copy
 from typing import Any, Dict, List
+
+try:
+    import rustworkx as rx
+except ImportError:  # Digital-twin and offline use remains available without the wheel.
+    rx = None
 
 
 def create_default_network_inventory() -> Dict[str, Dict[str, Any]]:
@@ -341,6 +345,22 @@ class NetworkTopologyGraph:
 
     def __init__(self, inventory: Dict[str, Dict[str, Any]]) -> None:
         self.inventory = inventory
+        self._rx_graph = None
+        self._node_indices: Dict[str, int] = {}
+        if rx is not None:
+            graph = rx.PyGraph()
+            for dev_id, dev in inventory.items():
+                self._node_indices[dev_id] = graph.add_node({"device_id": dev_id, **dev})
+            seen: set[tuple[str, str]] = set()
+            for dev_id, dev in inventory.items():
+                for neighbor in dev.get("neighbors", []):
+                    target = neighbor.get("neighbor_device")
+                    if target in self._node_indices and target != dev_id:
+                        edge = tuple(sorted((dev_id, target)))
+                        if edge not in seen:
+                            seen.add(edge)
+                            graph.add_edge(self._node_indices[dev_id], self._node_indices[target], neighbor)
+            self._rx_graph = graph
 
     def export_topology(self) -> Dict[str, Any]:
         nodes: List[Dict[str, Any]] = []
@@ -409,14 +429,80 @@ class NetworkTopologyGraph:
         else:
             risk = "LOW"
 
+        blast = self.calculate_blast_radius(device_id)
         return {
             "can_evaluate": True,
             "device_id": device_id,
             "hostname": dev["hostname"],
             "risk_level": risk,
-            "affected_neighbors": neighbors,
-            "affected_services": services,
-            "estimated_customers_in_blast_radius": customers,
+            "affected_neighbors": blast["affected_devices"],
+            "affected_services": blast["affected_services"] or services,
+            "estimated_customers_in_blast_radius": blast["estimated_customers"],
             "redundancy_available": len(neighbors) >= 2,
             "oob_recovery_available": bool(dev.get("oob_available", True)),
+            "blast_radius_graph": blast,
         }
+
+    def calculate_blast_radius(self, device_id: str) -> Dict[str, Any]:
+        """Return reachable devices/services and articulation impact for NetCanvas.
+
+        Uses rustworkx for the stored topology when installed. Unknown layer/Vrf
+        metadata is represented as empty; the graph never fabricates it.
+        """
+        if device_id not in self.inventory:
+            return {"root": device_id, "affected_devices": [], "affected_services": [],
+                    "estimated_customers": 0, "articulation_devices": [], "vrfs": [],
+                    "l2_domains": [], "l3_domains": [], "graph_backend": "unavailable"}
+        adjacency: Dict[str, set[str]] = {key: set() for key in self.inventory}
+        for source, dev in self.inventory.items():
+            for neighbor in dev.get("neighbors", []):
+                target = neighbor.get("neighbor_device")
+                if target in adjacency:
+                    adjacency[source].add(target)
+                    adjacency[target].add(source)
+        if self._rx_graph is not None:
+            idx = self._node_indices[device_id]
+            queue, visited = [idx], {idx}
+            for current in queue:
+                for nxt in self._rx_graph.neighbors(current):
+                    if nxt not in visited:
+                        visited.add(nxt)
+                        queue.append(nxt)
+            reached = {self._rx_graph[index]["device_id"] for index in visited}
+            backend = "rustworkx"
+        else:
+            queue, reached = [device_id], {device_id}
+            for current in queue:
+                for nxt in adjacency[current] - reached:
+                    reached.add(nxt)
+                    queue.append(nxt)
+            backend = "python"
+        articulation: list[str] = []
+        base_count = len(reached)
+        for candidate in reached - {device_id}:
+            remaining = reached - {candidate}
+            start = next(iter(remaining), None)
+            if start is None:
+                continue
+            seen, walk = {start}, [start]
+            for current in walk:
+                for nxt in adjacency[current] & remaining - seen:
+                    seen.add(nxt)
+                    walk.append(nxt)
+            if len(seen) < len(remaining) and base_count > 2:
+                articulation.append(candidate)
+        services = sorted({str(service) for node in reached
+                           for service in self.inventory[node].get("dependent_services", [])})
+        customers = sum(int(self.inventory[node].get("affected_customers_estimate", 0)) for node in reached)
+        vrfs = sorted({str(vrf) for node in reached for vrf in self.inventory[node].get("vrfs", [])})
+        l2 = sorted({str(domain) for node in reached for domain in self.inventory[node].get("l2_domains", [])})
+        l3 = sorted({str(domain) for node in reached for domain in self.inventory[node].get("l3_domains", [])})
+        return {"root": device_id, "affected_devices": sorted(reached - {device_id}),
+                "affected_services": services, "estimated_customers": customers,
+                "articulation_devices": sorted(articulation), "vrfs": vrfs,
+                "l2_domains": l2, "l3_domains": l3, "graph_backend": backend,
+                "nodes": [{"id": node, "impact": "direct" if node in adjacency[device_id] else "transitive"}
+                          for node in sorted(reached)],
+                "edges": [{"source": node, "target": neighbor}
+                          for node in sorted(reached) for neighbor in sorted(adjacency[node] & reached)
+                          if node < neighbor]}

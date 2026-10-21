@@ -11,6 +11,8 @@ Executa os 11 passos obrigatórios combinando:
 from __future__ import annotations
 
 from datetime import datetime, timezone
+import hashlib
+import json
 from typing import Any, Dict, List, Optional
 
 from core.inference.generator import AutoregressiveGenerator, GenerationConfig
@@ -18,6 +20,7 @@ from knowledge.retrieval.rag_engine import HybridRAGEngine
 from networking.vendors.adapters import BaseVendorAdapter
 from networking.topology.graph import NetworkTopologyGraph
 from networking.protocols.analyzers import analyze_protocol_anomalies
+from core.contracts import EpistemicTag, NetCanvasArtifact
 
 
 class NetworkDiagnosticEngine:
@@ -217,6 +220,12 @@ class NetworkDiagnosticEngine:
             else (0.35 if incomplete_telemetry_simulation else 0.75)
         )
 
+        evidence_trail = (
+            [{"tag": EpistemicTag.VERIFIED_FACT.value, "text": item} for item in verified_facts]
+            + [{"tag": EpistemicTag.TECHNICAL_INFERENCE.value, "text": item} for item in technical_inferences]
+            + [{"tag": EpistemicTag.HYPOTHESIS.value, "text": item} for item in hypotheses]
+        )
+
         for s_num, s_name, s_data in [
             (6, "Formulação de Hipóteses Verificáveis", hypotheses),
             (7, "Determinação de Testes Seguros (Read-Only)", safe_tests),
@@ -226,6 +235,23 @@ class NetworkDiagnosticEngine:
             (11, "Consolidação de Evidências, Riscos e Confiança", {"confidence": confidence}),
         ]:
             steps_trace.append({"step": s_num, "name": s_name, "detail": s_data})
+
+        report_payload = {
+            "problem_description": problem_description,
+            "steps_executed": steps_trace,
+            "evidence": evidence_trail,
+            "root_causes": root_causes,
+            "confidence": confidence,
+        }
+        report_hash = hashlib.sha256(
+            json.dumps(report_payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        ).hexdigest()
+        artifact = NetCanvasArtifact(
+            id=f"diagnostic-{report_hash[:16]}", version=1, type="diagnostic_11_steps",
+            baseline_content=None,
+            proposed_content=json.dumps(report_payload, ensure_ascii=False, default=str),
+            blast_radius_graph=None, change_stage="diagnosis_complete", sha256_hash=report_hash,
+        )
 
         return {
             "timestamp": datetime.now(timezone.utc).isoformat(),
@@ -238,6 +264,8 @@ class NetworkDiagnosticEngine:
                 "technical_inferences": technical_inferences,
                 "hypotheses": hypotheses,
             },
+            "evidence_trail": evidence_trail,
+            "diagnostic_artifact": artifact.model_dump(mode="json"),
             "root_causes": root_causes,
             "safe_diagnostic_commands": safe_tests,
             "proposed_remediation_commands": recommended_commands,

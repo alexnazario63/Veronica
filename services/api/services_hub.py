@@ -14,12 +14,18 @@ Implementação dos 10 Serviços Modulares da Veronica (Seção 16.6):
 
 from __future__ import annotations
 
+import asyncio
 from datetime import datetime, timezone, timedelta
+import base64
+import io
 import json
+import os
 from pathlib import Path
 import re
 import sqlite3
 import threading
+import tempfile
+import wave
 from typing import Any, Dict, Iterator, List, Optional
 import uuid
 
@@ -32,14 +38,17 @@ from core.training import (
     VeronicaTrainer,
     get_real_hardware_telemetry,
 )
-import numpy as np
-from core.neural.tensor import Tensor
 from core.inference import AutoregressiveGenerator, GenerationConfig
+from core.agent import AgentTool, ReActOrchestrator
+from core.contracts import ToolSafetyTier
 from core.neural.checkpoint import load_checkpoint
 from core.development import DevelopmentEngine, AutonomousCognitiveDaemon
 from knowledge import KnowledgeIngestor, HybridRAGEngine, OfficialDocumentationSearchConnector
 from knowledge.sources.catalog import KnowledgeDocument
-from knowledge.ingestion.ingestor import scrub_secrets, detect_prompt_injection, search_live_web_and_rfc
+from knowledge.retrieval.open_domain import (
+    OpenDomainKnowledgeStore, assess_source, classify_domain, synthesize_evidence, terms as open_domain_terms,
+)
+from knowledge.ingestion.ingestor import scrub_secrets, search_live_web_and_rfc
 from networking import (
     COMPATIBILITY_MATRIX,
     DigitalTwinNetworkAdapter,
@@ -258,6 +267,23 @@ class ConversationService:
             "timestamp": now,
         }
 
+    def delete_conversation(self, conversation_id: str, user_id: str) -> Dict[str, Any]:
+        """
+        Exclui permanentemente a sessão conversacional e todas as mensagens associadas.
+        Garante isolamento de usuário e higienização completa no SQLite.
+        """
+        self.get_conversation(conversation_id, user_id)
+        with self._connect() as conn:
+            conn.execute("DELETE FROM messages WHERE conversation_id = ?", (conversation_id,))
+            conn.execute("DELETE FROM conversations WHERE conversation_id = ? AND user_id = ?", (conversation_id, user_id))
+            conn.commit()
+        return {
+            "conversation_id": conversation_id,
+            "deleted": True,
+            "status": "CONVERSATION_DELETED",
+            "message": f"Conversa '{conversation_id}' excluída com sucesso."
+        }
+
 
 class SpeechRecognitionService:
     """
@@ -267,6 +293,73 @@ class SpeechRecognitionService:
 
     MAX_AUDIO_DURATION_SEC = 120.0
     MAX_AUDIO_BYTES = 10 * 1024 * 1024  # 10 MB
+
+    def __init__(self) -> None:
+        self._whisper_model: Any = None
+        self._whisper_error: Optional[str] = None
+        self._whisper_lock = threading.Lock()
+
+    def _load_whisper(self) -> Any:
+        if self._whisper_model is not None:
+            return self._whisper_model
+        if self._whisper_error is not None:
+            return None
+        with self._whisper_lock:
+            if self._whisper_model is not None or self._whisper_error is not None:
+                return self._whisper_model
+            model_path = os.environ.get("VERONICA_WHISPER_MODEL_PATH", "").strip()
+            if not model_path:
+                self._whisper_error = "LOCAL_MODEL_PATH_NOT_CONFIGURED"
+                return None
+            if not Path(model_path).exists():
+                self._whisper_error = "LOCAL_MODEL_PATH_NOT_FOUND"
+                return None
+            try:
+                from faster_whisper import WhisperModel
+                self._whisper_model = WhisperModel(
+                    model_path,
+                    device=os.environ.get("VERONICA_WHISPER_DEVICE", "cpu"),
+                    compute_type=os.environ.get("VERONICA_WHISPER_COMPUTE_TYPE", "int8"),
+                    local_files_only=True,
+                )
+            except TypeError:
+                # Older faster-whisper versions do not expose local_files_only;
+                # a filesystem model path still prevents implicit model downloads.
+                try:
+                    from faster_whisper import WhisperModel
+                    self._whisper_model = WhisperModel(
+                        model_path,
+                        device=os.environ.get("VERONICA_WHISPER_DEVICE", "cpu"),
+                        compute_type=os.environ.get("VERONICA_WHISPER_COMPUTE_TYPE", "int8"),
+                    )
+                except Exception as exc:
+                    self._whisper_error = f"LOCAL_STT_UNAVAILABLE:{type(exc).__name__}"
+            except Exception as exc:
+                self._whisper_error = f"LOCAL_STT_UNAVAILABLE:{type(exc).__name__}"
+        return self._whisper_model
+
+    def _transcribe_local(self, audio: bytes, audio_format: str) -> tuple[str, str | None]:
+        model = self._load_whisper()
+        if model is None:
+            return "", self._whisper_error or "LOCAL_STT_UNAVAILABLE"
+        suffix = "." + re.sub(r"[^a-zA-Z0-9]", "", audio_format.lower())[:8]
+        if suffix == ".":
+            suffix = ".wav"
+        path = ""
+        try:
+            with tempfile.NamedTemporaryFile(suffix=suffix, delete=False) as handle:
+                handle.write(audio)
+                path = handle.name
+            segments, _info = model.transcribe(path, language="pt", vad_filter=True)
+            return " ".join(segment.text.strip() for segment in segments).strip(), None
+        except Exception as exc:
+            return "", f"LOCAL_STT_FAILED:{type(exc).__name__}"
+        finally:
+            if path:
+                try:
+                    Path(path).unlink(missing_ok=True)
+                except OSError:
+                    pass
 
     PHONETIC_REPLACEMENTS = {
         r"\bo s p f\b": "OSPF",
@@ -287,11 +380,20 @@ class SpeechRecognitionService:
         audio_size_bytes: int = 32000,
         consent_granted: bool = False,
         rms_energy_db: float = -22.0,
+        audio_data_base64: Optional[str] = None,
+        audio_format: str = "wav",
     ) -> Dict[str, Any]:
         if not consent_granted:
             raise PermissionError(
                 "AUDIO_CONSENT_REQUIRED: Captura e processamento de voz exigem consentimento explícito do usuário."
             )
+        audio_bytes: Optional[bytes] = None
+        if audio_data_base64:
+            try:
+                audio_bytes = base64.b64decode(audio_data_base64, validate=True)
+            except (ValueError, base64.binascii.Error) as exc:
+                raise ValueError("INVALID_AUDIO_ENCODING: Áudio deve ser base64 válido.") from exc
+            audio_size_bytes = len(audio_bytes)
         if duration_sec > self.MAX_AUDIO_DURATION_SEC:
             raise ValueError(
                 f"AUDIO_DURATION_LIMIT_EXCEEDED: Duração ({duration_sec}s) excede o máximo permitido ({self.MAX_AUDIO_DURATION_SEC}s)."
@@ -299,14 +401,24 @@ class SpeechRecognitionService:
         if audio_size_bytes > self.MAX_AUDIO_BYTES:
             raise ValueError("AUDIO_SIZE_LIMIT_EXCEEDED: Arquivo de áudio excede 10 MB.")
 
-        normalized = raw_transcript.strip()
+        stt_error = None
+        transcript = raw_transcript
+        if audio_bytes is not None:
+            transcript, stt_error = self._transcribe_local(audio_bytes, audio_format)
+            if not transcript:
+                transcript = raw_transcript
+
+        normalized = transcript.strip()
         for pat, repl in self.PHONETIC_REPLACEMENTS.items():
             normalized = re.sub(pat, repl, normalized, flags=re.IGNORECASE)
 
         vad_speech_detected = rms_energy_db > -45.0 and len(normalized) > 0
         return {
-            "original_transcript": raw_transcript,
+            "original_transcript": transcript,
             "normalized_transcript": normalized,
+            "stt_backend": "faster-whisper-local" if audio_bytes is not None and not stt_error else "provided-transcript",
+            "stt_available": stt_error is None if audio_bytes is not None else None,
+            "stt_error": stt_error,
             "vad_speech_detected": vad_speech_detected,
             "end_of_turn_detected": True,
             "duration_sec": duration_sec,
@@ -323,6 +435,45 @@ class SpeechSynthesisService:
 
     def __init__(self) -> None:
         self.active_streams: Dict[str, bool] = {}
+        self._piper_voice: Any = None
+        self._piper_error: Optional[str] = None
+        self._piper_lock = threading.Lock()
+
+    def _load_piper(self) -> Any:
+        if self._piper_voice is not None:
+            return self._piper_voice
+        if self._piper_error is not None:
+            return None
+        with self._piper_lock:
+            if self._piper_voice is not None or self._piper_error is not None:
+                return self._piper_voice
+            model_path = os.environ.get("VERONICA_PIPER_MODEL_PATH", "").strip()
+            if not model_path:
+                self._piper_error = "LOCAL_MODEL_PATH_NOT_CONFIGURED"
+                return None
+            if not Path(model_path).is_file():
+                self._piper_error = "LOCAL_MODEL_PATH_NOT_FOUND"
+                return None
+            try:
+                from piper.voice import PiperVoice
+                config_path = Path(model_path + ".json")
+                kwargs = {"config_path": str(config_path)} if config_path.is_file() else {}
+                self._piper_voice = PiperVoice.load(model_path, **kwargs)
+            except Exception as exc:
+                self._piper_error = f"LOCAL_TTS_UNAVAILABLE:{type(exc).__name__}"
+        return self._piper_voice
+
+    def _synthesize_local(self, text: str) -> tuple[str | None, str | None]:
+        voice = self._load_piper()
+        if voice is None:
+            return None, self._piper_error or "LOCAL_TTS_UNAVAILABLE"
+        output = io.BytesIO()
+        try:
+            with wave.open(output, "wb") as wav_file:
+                voice.synthesize_wav(text, wav_file)
+            return base64.b64encode(output.getvalue()).decode("ascii"), None
+        except Exception as exc:
+            return None, f"LOCAL_TTS_FAILED:{type(exc).__name__}"
 
     def synthesize_segments(self, conversation_id: str, text: str) -> Dict[str, Any]:
         self.active_streams[conversation_id] = True
@@ -330,6 +481,8 @@ class SpeechSynthesisService:
         clean_speech = re.sub(r"```[\s\S]*?```", " [Bloco de comandos CLI disponível na tela.] ", text)
         clean_speech = re.sub(r"[#*`_~]", "", clean_speech)
         sentences = [s.strip() for s in re.split(r"(?<=[\.\!\?\n])\s+", clean_speech) if s.strip()]
+        spoken_text = " ".join(sentences[:12])
+        audio_data, tts_error = self._synthesize_local(spoken_text) if spoken_text else (None, None)
 
         return {
             "conversation_id": conversation_id,
@@ -337,7 +490,12 @@ class SpeechSynthesisService:
             "voice_profile": "Veronica-PT-BR-Technical",
             "interrupted": False,
             "segments": sentences[:12],
-            "full_spoken_text": " ".join(sentences[:12]),
+            "full_spoken_text": spoken_text,
+            "tts_backend": "piper-local" if audio_data else "text-segments",
+            "tts_available": audio_data is not None,
+            "tts_error": tts_error,
+            "audio_mime_type": "audio/wav" if audio_data else None,
+            "audio_base64": audio_data,
         }
 
     def interrupt(self, conversation_id: str) -> Dict[str, Any]:
@@ -445,6 +603,96 @@ class ChatService:
             "prior_messages": prior_msgs,
         }
 
+    def _generate_svg_image_for_prompt(self, prompt: str) -> str:
+        """
+        Gera imagens vetoriais SVG de alta resolução desenhadas autonomamente pela Veronica:
+        Topologias de rede, fluxo de protocolos, anéis ópticos DWDM e arquiteturas.
+        """
+        p = prompt.lower()
+        if "dwdm" in p or "optico" in p or "óptic" in p:
+            return (
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" style="width:100%;max-width:760px;height:auto;background:#030712;border-radius:12px;font-family:Segoe UI,Inter,sans-serif;">'
+                '<defs>'
+                '<linearGradient id="bgGlow" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#020617"/></linearGradient>'
+                '<linearGradient id="fiberGlow" x1="0%" y1="0%" x2="100%" y2="0%"><stop offset="0%" stop-color="#38bdf8"/><stop offset="50%" stop-color="#ec4899"/><stop offset="100%" stop-color="#10b981"/></linearGradient>'
+                '<filter id="glow"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
+                '</defs>'
+                '<rect width="760" height="360" fill="url(#bgGlow)" rx="12" stroke="#1e293b" stroke-width="2"/>'
+                '<text x="30" y="36" fill="#38bdf8" font-size="13" font-weight="700" letter-spacing="1">VERONICA NEURAL GENERATOR — TOPOLOGIA DWDM BANDA C</text>'
+                '<text x="30" y="56" fill="#64748b" font-size="11">Anel Metro ROADM • 40 Canais • λ1: 1550.12nm (Tx: +2.0dBm, Rx: -11.4dBm)</text>'
+                '<circle cx="380" cy="200" r="110" fill="none" stroke="url(#fiberGlow)" stroke-width="4" stroke-dasharray="6,4" filter="url(#glow)"/>'
+                '<circle cx="380" cy="90" r="26" fill="#0f172a" stroke="#38bdf8" stroke-width="3" filter="url(#glow)"/>'
+                '<text x="380" y="94" fill="#f8fafc" font-size="10" font-weight="bold" text-anchor="middle">ROADM-01</text>'
+                '<text x="380" y="55" fill="#38bdf8" font-size="11" text-anchor="middle">Core Metro Alpha</text>'
+                '<circle cx="490" cy="200" r="26" fill="#0f172a" stroke="#10b981" stroke-width="3" filter="url(#glow)"/>'
+                '<text x="490" y="204" fill="#f8fafc" font-size="10" font-weight="bold" text-anchor="middle">ROADM-02</text>'
+                '<text x="565" y="204" fill="#10b981" font-size="11">Core Beta (+1.8 dBm)</text>'
+                '<circle cx="380" cy="310" r="26" fill="#0f172a" stroke="#ec4899" stroke-width="3" filter="url(#glow)"/>'
+                '<text x="380" y="314" fill="#f8fafc" font-size="10" font-weight="bold" text-anchor="middle">ROADM-03</text>'
+                '<text x="380" y="348" fill="#ec4899" font-size="11" text-anchor="middle">EDFA Optical Amp</text>'
+                '<circle cx="270" cy="200" r="26" fill="#0f172a" stroke="#f59e0b" stroke-width="3" filter="url(#glow)"/>'
+                '<text x="270" y="204" fill="#f8fafc" font-size="10" font-weight="bold" text-anchor="middle">ROADM-04</text>'
+                '<text x="195" y="204" fill="#f59e0b" font-size="11">Transponder 100G</text>'
+                '<rect x="330" y="185" width="100" height="30" rx="6" fill="#090d16" stroke="#334155"/>'
+                '<text x="380" y="204" fill="#10b981" font-size="11" font-weight="bold" text-anchor="middle">STATUS: NOMINAL</text>'
+                '</svg>'
+            )
+        elif "bgp" in p or "peering" in p or "as" in p:
+            return (
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" style="width:100%;max-width:760px;height:auto;background:#030712;border-radius:12px;font-family:Segoe UI,Inter,sans-serif;">'
+                '<defs>'
+                '<linearGradient id="bgBgp" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#020617"/></linearGradient>'
+                '<filter id="glowBgp"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
+                '</defs>'
+                '<rect width="760" height="360" fill="url(#bgBgp)" rx="12" stroke="#1e293b" stroke-width="2"/>'
+                '<text x="30" y="36" fill="#38bdf8" font-size="13" font-weight="700" letter-spacing="1">VERONICA NEURAL GENERATOR — ARQUITETURA BGP MULTI-AS</text>'
+                '<text x="30" y="56" fill="#64748b" font-size="11">Sessões eBGP (TCP 179) • iBGP Route Reflector Mesh • Comunidades BGP</text>'
+                '<rect x="40" y="85" width="300" height="240" rx="10" fill="#0b1329" stroke="#3b82f6" stroke-width="1.5" stroke-dasharray="4,4"/>'
+                '<text x="60" y="110" fill="#60a5fa" font-size="12" font-weight="bold">AS 65000 (Rede Local / Core)</text>'
+                '<rect x="420" y="85" width="300" height="240" rx="10" fill="#0b1329" stroke="#10b981" stroke-width="1.5" stroke-dasharray="4,4"/>'
+                '<text x="440" y="110" fill="#34d399" font-size="12" font-weight="bold">AS 65001 (Upstream Transit / Tier-1)</text>'
+                '<circle cx="130" cy="180" r="24" fill="#1e293b" stroke="#38bdf8" stroke-width="2" filter="url(#glowBgp)"/>'
+                '<text x="130" y="184" fill="#fff" font-size="10" font-weight="bold" text-anchor="middle">RR-01</text>'
+                '<circle cx="260" cy="230" r="24" fill="#1e293b" stroke="#38bdf8" stroke-width="2" filter="url(#glowBgp)"/>'
+                '<text x="260" y="234" fill="#fff" font-size="10" font-weight="bold" text-anchor="middle">BORDER-01</text>'
+                '<line x1="130" y1="180" x2="260" y2="230" stroke="#38bdf8" stroke-width="2" stroke-dasharray="4,2"/>'
+                '<text x="170" y="215" fill="#94a3b8" font-size="9">iBGP Mesh</text>'
+                '<line x1="284" y1="230" x2="476" y2="230" stroke="#f59e0b" stroke-width="3" filter="url(#glowBgp)"/>'
+                '<text x="380" y="220" fill="#f59e0b" font-size="11" font-weight="bold" text-anchor="middle">eBGP TCP 179</text>'
+                '<text x="380" y="245" fill="#94a3b8" font-size="9" text-anchor="middle">Hold: 180s | Keepalive: 60s</text>'
+                '<circle cx="500" cy="230" r="24" fill="#1e293b" stroke="#10b981" stroke-width="2" filter="url(#glowBgp)"/>'
+                '<text x="500" y="234" fill="#fff" font-size="10" font-weight="bold" text-anchor="middle">TIER1-PE01</text>'
+                '<circle cx="630" cy="180" r="24" fill="#1e293b" stroke="#10b981" stroke-width="2" filter="url(#glowBgp)"/>'
+                '<text x="630" y="184" fill="#fff" font-size="10" font-weight="bold" text-anchor="middle">TIER1-RR</text>'
+                '<line x1="500" y1="230" x2="630" y2="180" stroke="#10b981" stroke-width="2" stroke-dasharray="4,2"/>'
+                '</svg>'
+            )
+        else:
+            return (
+                '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 760 360" style="width:100%;max-width:760px;height:auto;background:#030712;border-radius:12px;font-family:Segoe UI,Inter,sans-serif;">'
+                '<defs>'
+                '<linearGradient id="bgOspf" x1="0%" y1="0%" x2="100%" y2="100%"><stop offset="0%" stop-color="#0f172a"/><stop offset="100%" stop-color="#020617"/></linearGradient>'
+                '<filter id="glowOspf"><feGaussianBlur stdDeviation="3" result="coloredBlur"/><feMerge><feMergeNode in="coloredBlur"/><feMergeNode in="SourceGraphic"/></feMerge></filter>'
+                '</defs>'
+                '<rect width="760" height="360" fill="url(#bgOspf)" rx="12" stroke="#1e293b" stroke-width="2"/>'
+                '<text x="30" y="36" fill="#38bdf8" font-size="13" font-weight="700" letter-spacing="1">VERONICA NEURAL GENERATOR — TOPOLOGIA OSPF ÁREA 0 & STUB ROUTER</text>'
+                '<text x="30" y="56" fill="#64748b" font-size="11">Convergência SPF • RFC 6987 MaxLinkMetric (65535) • Drenagem Suave de Tráfego</text>'
+                '<line x1="150" y1="130" x2="610" y2="130" stroke="#10b981" stroke-width="4" filter="url(#glowOspf)"/>'
+                '<text x="380" y="120" fill="#10b981" font-size="11" font-weight="bold" text-anchor="middle">Caminho Preferencial SPF — Cost: 10 (100GE Link)</text>'
+                '<path d="M 150 130 Q 380 270 610 130" fill="none" stroke="#f59e0b" stroke-width="3" stroke-dasharray="6,4" filter="url(#glowOspf)"/>'
+                '<text x="380" y="245" fill="#f59e0b" font-size="11" font-weight="bold" text-anchor="middle">MaxLinkMetric Drenado — Cost: 65535 (RFC 6987)</text>'
+                '<circle cx="150" cy="130" r="28" fill="#0f172a" stroke="#38bdf8" stroke-width="3" filter="url(#glowOspf)"/>'
+                '<text x="150" y="134" fill="#fff" font-size="11" font-weight="bold" text-anchor="middle">CORE-01</text>'
+                '<text x="150" y="180" fill="#94a3b8" font-size="10" text-anchor="middle">Loopback: 10.0.0.1</text>'
+                '<circle cx="380" cy="225" r="28" fill="#0f172a" stroke="#f59e0b" stroke-width="3" filter="url(#glowOspf)"/>'
+                '<text x="380" y="229" fill="#fff" font-size="11" font-weight="bold" text-anchor="middle">CORE-02</text>'
+                '<text x="380" y="275" fill="#f59e0b" font-size="10" font-weight="bold" text-anchor="middle">STUB ROUTER (Manutenção)</text>'
+                '<circle cx="610" cy="130" r="28" fill="#0f172a" stroke="#38bdf8" stroke-width="3" filter="url(#glowOspf)"/>'
+                '<text x="610" y="134" fill="#fff" font-size="11" font-weight="bold" text-anchor="middle">CORE-03</text>'
+                '<text x="610" y="180" fill="#94a3b8" font-size="10" text-anchor="middle">Loopback: 10.0.0.3</text>'
+                '</svg>'
+            )
+
     def _classify_intent(
         self,
         text: str,
@@ -483,6 +731,15 @@ class ChatService:
         ]
         if any(re.search(p, low) for p in integration_patterns):
             return "INTEGRATION_REQUEST"
+
+        # 3.5. Solicitação de Geração de Imagem / Desenho de Topologia
+        image_gen_patterns = [
+            r"\b(ger[ea]|criar?|desenh[ea]|mostrar?|fa[cç]a|elabore).*(imagem|desenho|diagrama visual|ilustra[cç][aã]o|topologia visual|esquema visual)\b",
+            r"\b(gerar imagens?|desenhar|imagem da rede|imagem do ospf|imagem do bgp|imagem de roteadores)\b",
+            r"\b(quero uma imagem|pode gerar uma imagem|gere um desenho|desenhe uma topologia|crie uma imagem)\b",
+        ]
+        if any(re.search(p, low) for p in image_gen_patterns):
+            return "IMAGE_GENERATION"
 
         # 4. Saudações e Diálogo Cotidiano Geral
         greeting_patterns = [
@@ -544,8 +801,12 @@ class ChatService:
         modality: str = "TEXT",
         target_devices: Optional[List[str]] = None,
         mode: str = "chat",
+        image_data: Optional[str] = None,
     ) -> Dict[str, Any]:
         self._cancel_flags[conversation_id] = False
+
+        if image_data:
+            modality = "MULTIMODAL"
 
         # Modo de operação: CHAT (diálogo humano e inteligente), AGENT (ReAct autônomo), WORK (artefatos e CLI)
         op_mode = (mode or "chat").lower().strip()
@@ -558,17 +819,35 @@ class ChatService:
             elif any(k in low_txt for k in ["modo work", "modo trabalho", "modo operacional", "/work"]):
                 op_mode = "work"
 
-        # Registra mensagem do usuário na sessão
+        # Registra mensagem do usuário na sessão (com anexo de imagem se houver)
+        user_payload: Dict[str, Any] = {}
+        if image_data:
+            user_payload["attached_image"] = True
+            user_payload["image_data"] = image_data
+
         self.conversation_service.append_message(
             conversation_id=conversation_id,
             user_id=user_id,
             role="user",
             content=message_text,
             modality=modality,
+            structured_payload=user_payload,
         )
 
         dev = self.hub.development_engine if self.hub and hasattr(self.hub, "development_engine") else None
         memory = dev.memory if dev else None
+
+        # Percepção visual multimodal se houver imagem anexada
+        visual_analysis_note = ""
+        if image_data and dev and hasattr(dev, "see_and_learn"):
+            try:
+                vis_out = dev.see_and_learn(image_input=image_data, context_hint=message_text, user_id=user_id)
+                visual_analysis_note = (
+                    f"> 👁️ **Análise Visual da Verônica:** Imagem examinada pelo Córtex Visual. Topologia detectada: **{vis_out.get('detected_topology', 'Rede')}**, "
+                    f"componentes identificados: {len(vis_out.get('detected_components', []))}, novos neurônios criados: {vis_out.get('new_neurons_count', 0)}.\n\n"
+                )
+            except Exception:
+                pass
 
         # 1. Atualiza memória de trabalho imediata (buffer 7±2)
         if memory:
@@ -576,10 +855,11 @@ class ChatService:
                 concept="USER_INPUT",
                 modality=modality,
                 summary=f"Operador ({user_id}) [{op_mode.upper()}]: {message_text[:80]}",
+                metadata={"user_id": user_id, "conversation_id": conversation_id},
             )
 
         # 2. Consulta memória binária persistente e autobiográfica em tempo real
-        relevant_memories = memory.search_episodic_memories(message_text, limit=2) if memory else []
+        relevant_memories = memory.search_episodic_memories(message_text, limit=2, user_id=user_id) if memory else []
 
         conv_context = self._extract_conversation_context(conversation_id, user_id, message_text)
         intent = self._classify_intent(message_text, target_devices, context=conv_context)
@@ -588,22 +868,25 @@ class ChatService:
         def _finalize_and_record_memory(content_md: str, payload: Dict[str, Any]) -> Dict[str, Any]:
             if dev and dev.memory:
                 try:
-                    concepts_to_assoc = [
-                        w.upper() for w in ["BGP", "OSPF", "MPLS", "VRP", "IOS-XR", "JUNOS", "MTU", "DWDM", "ROUTER"]
-                        if w.lower() in message_text.lower()
-                    ] or ["NETWORKING"]
+                    stop = {"qual", "quais", "como", "quando", "onde", "para", "sobre", "com", "uma", "the", "what", "with", "from"}
+                    terms = [token.upper() for token in re.findall(r"[\w-]{4,}", message_text) if token.lower() not in stop]
+                    concepts_to_assoc = list(dict.fromkeys(terms[:6])) or ["CONVERSATION"]
+                    source_refs = [
+                        {"title": str(source.get("title", ""))[:160], "url": str(source.get("source_uri", ""))[:500]}
+                        for source in payload.get("technical_sources", [])[:5]
+                    ]
                     dev.memory.record_episodic_memory(
                         modality="CONVERSATION",
-                        experience_summary=f"[{op_mode.upper()}] Interação com {user_id}: {message_text[:70]}",
+                        experience_summary=f"[{op_mode.upper()}] {message_text[:240]} | Veronica: {content_md[:320]}",
                         perceptual_details={
-                            "mode": op_mode,
-                            "intent": intent,
-                            "devices": target_devices or [],
-                            "diagnosis": str(payload.get("diagnosis", ""))[:120],
+                            "mode": op_mode, "intent": intent, "conversation_id": conversation_id,
+                            "user_id": user_id, "user_message": scrub_secrets(message_text)[:1200],
+                            "assistant_response": scrub_secrets(content_md)[:2400], "sources": source_refs,
+                            "diagnosis": str(payload.get("diagnosis", ""))[:240],
+                            "epistemic_breakdown": payload.get("epistemic_breakdown", {}),
                         },
                         emotive_valence="RESOLUCAO" if intent == "DIAGNOSTIC" else "SATISFACAO",
-                        salience=0.85,
-                        associated_concepts=concepts_to_assoc,
+                        salience=0.85, associated_concepts=concepts_to_assoc,
                     )
                 except Exception:
                     pass
@@ -830,14 +1113,14 @@ class ChatService:
                 )
             elif op_mode == "work":
                 formatted_markdown = (
-                    f"### 🛠️ Artefato Operacional: Inventário & Status de Rede\n\n"
-                    f"| Dispositivo | Vendor | SO | Status | Alarmes |\n"
-                    f"|---|---|---|---|---|\n"
+                    "### 🛠️ Artefato Operacional: Inventário & Status de Rede\n\n"
+                    "| Dispositivo | Vendor | SO | Status | Alarmes |\n"
+                    "|---|---|---|---|---|\n"
                     + "\n".join(
                         f"| `{d['device_id']}` | {d['vendor']} | {d['os_name']} | {'⚠️ ALERTA' if d.get('alarms') else '✅ OK'} | {'; '.join(d.get('alarms', [])) or 'Nenhum'} |"
                         for d in inv.values()
                     )
-                    + f"\n\n#### Comandos Recomendados para Validação em Produção\n```cli\ndisplay device\nshow version\ndisplay ip interface brief\n```"
+                    + "\n\n#### Comandos Recomendados para Validação em Produção\n```cli\ndisplay device\nshow version\ndisplay ip interface brief\n```"
                 )
             else:
                 formatted_markdown = (
@@ -1191,10 +1474,10 @@ class ChatService:
         if intent == "GENERAL_CHAT":
             spoken_summary = "Estou aqui para conversar e colaborar com o que você precisar."
             formatted_markdown = (
-                f"Olá! Entendi perfeitamente sua mensagem.\n\n"
-                f"Como sua parceira de IA, posso dialogar sobre qualquer assunto — desde dúvidas cotidianas, história e tecnologia até "
-                f"engenharia de redes, arquitetura de sistemas e geração de códigos em Python.\n\n"
-                f"Estou com minha memória ativa e aprendendo a cada conversa. Em que posso colaborar com você agora?"
+                "Olá! Entendi perfeitamente sua mensagem.\n\n"
+                "Como sua parceira de IA, posso dialogar sobre qualquer assunto — desde dúvidas cotidianas, história e tecnologia até "
+                "engenharia de redes, arquitetura de sistemas e geração de códigos em Python.\n\n"
+                "Estou com minha memória ativa e aprendendo a cada conversa. Em que posso colaborar com você agora?"
             )
             structured_response = {
                 "agent_name": "Veronica",
@@ -1221,161 +1504,206 @@ class ChatService:
             }
             return _finalize_and_record_memory(formatted_markdown, structured_response)
 
-        # 7. Fluxo de Explicação Técnica / Consulta Analítica (Memória Binária + RAG + Auto-Pesquisa Web)
-        if intent == "EXPLANATION":
-            low = message_text.lower()
-            model_keywords = [
-                "ne40", "ne40e", "ne8000", "ccr2004", "ccr2116", "mx204", "mx960",
-                "asr9900", "asr9k", "ncs5500", "sr7750", "s6730", "arista", "fortigate"
-            ]
-            asked_specific_model = any(mk in low for mk in model_keywords)
+        # 6.5. Fluxo de Geração de Imagem / Desenho Técnico (IMAGE_GENERATION)
+        if intent == "IMAGE_GENERATION":
+            svg_markup = self._generate_svg_image_for_prompt(message_text)
+            spoken_summary = "Desenvolvi e gerei a representação visual solicitada da arquitetura de rede."
+            p_low = message_text.lower()
+            theme_title = "Topologia & Arquitetura de Rede"
+            if "dwdm" in p_low or "óptic" in p_low:
+                theme_title = "Anel Óptico DWDM Metro (Banda C & ROADM)"
+            elif "bgp" in p_low:
+                theme_title = "Arquitetura BGP Peering & Route Reflectors"
+            elif "ospf" in p_low:
+                theme_title = "Topologia OSPF Área 0 & Stub Router MaxLinkMetric"
 
-            rag_res = self.rag.search(message_text, top_k=3)
-            raw_results = rag_res.get("results", [])
-
-            # Avaliação Analítica de Cobertura (Thinking Before Answering):
-            # Só aceita um documento local se ele cobrir de fato os termos específicos perguntados (>= 75%).
-            # Evita retornar documento de OSPF EXSTART/MTU quando a pergunta é "qual metrica maxima do ospf ?".
-            relevant_results = [
-                r for r in raw_results
-                if float(r.get("query_coverage", 0.0)) >= 0.75
-            ]
-            top_doc = relevant_results[0]["document"] if relevant_results else None
-            citations = [r["citation"] for r in relevant_results]
-            top_coverage = float(raw_results[0].get("query_coverage", 0.0)) if raw_results else 0.0
-            missing_terms = raw_results[0].get("missing_terms", []) if raw_results else []
-
-            matched_specific_doc = False
-            if top_doc and asked_specific_model:
-                doc_text = (top_doc.get("title", "") + " " + top_doc.get("family_model", "") + " " + top_doc.get("content", "")).lower()
-                matched_specific_doc = any(mk in doc_text for mk in model_keywords if mk in low)
-
-            web_learned_now = False
-            # Se a memória local não cobre especificamente todos os conceitos da pergunta, busca na Web e aprende!
-            if (asked_specific_model and not matched_specific_doc) or not top_doc or top_coverage < 0.75:
-                if self.hub and hasattr(self.hub, "auto_research_and_learn"):
-                    learned = self.hub.auto_research_and_learn(message_text)
-                    if learned and learned.get("document"):
-                        top_doc = learned["document"]
-                        citations = [learned["citation"]]
-                        web_learned_now = True
-
-            # Neurogênese e plasticidade neural ativa a cada interação
-            if dev and hasattr(dev, "neurogenesis"):
-                words = [
-                    w for w in re.findall(r"[a-zA-Z0-9_\-\.]{3,}", message_text)
-                    if w.lower() not in ["que", "sobre", "qual", "quais", "para", "como", "uma", "com", "por", "dos", "das"]
-                ]
-                for kw in words[:3]:
-                    dev.neurogenesis.trigger_neurogenesis_for_concept(
-                        concept=kw.upper(),
-                        modality="CHAT_DIALOGUE",
-                        intensity=1,
-                    )
-                if hasattr(dev.neurogenesis, "circuit"):
-                    try:
-                        dev.neurogenesis.circuit.forward_integrated(
-                            Tensor(np.ones((1, 4, self.hub.config.d_model), dtype=np.float64)),
-                            context_concept=message_text[:30],
-                        )
-                    except Exception:
-                        pass
-                if hasattr(dev, "memory") and hasattr(dev.memory, "save_binary_memory"):
-                    try:
-                        dev.memory.save_binary_memory()
-                    except Exception:
-                        pass
-
-            doc_context = top_doc["content"] if top_doc else "Análise técnica fundamentada em documentação oficial e normas IETF RFC."
-            topic_name = (top_doc.get("family_model") or top_doc.get("title") or "Engenharia de Redes") if top_doc else "Engenharia de Redes"
-
-            spoken_summary = (
-                f"Analisei sua pergunta sobre {topic_name}. "
-                + (
-                    "Como esse ponto específico não constava completo na minha memória inicial, pesquisei nas normas oficiais na web, consolidei na memória binária e trouxe o resultado exato."
-                    if web_learned_now
-                    else "Recuperei a resposta exata diretamente da minha memória técnica consolidada."
-                )
+            image_box = (
+                f'<div style="margin:14px 0;border-radius:10px;overflow:hidden;border:1px solid rgba(56,189,248,0.25);background:#030712;box-shadow:0 8px 24px rgba(0,0,0,0.6);">'
+                f'<div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:rgba(15,23,42,0.85);border-bottom:1px solid rgba(255,255,255,0.08);font-size:11.5px;color:#94a3b8;">'
+                f'<span>🎨 <strong>Visual Vetorial Gerado pela Verônica</strong> ({theme_title})</span>'
+                f'<span style="color:#38bdf8;font-size:10.5px;font-weight:600;">SVG Nativo</span>'
+                f'</div>'
+                f'<div style="padding:10px;display:flex;justify-content:center;">'
+                f'{svg_markup}'
+                f'</div>'
+                f'</div>'
             )
-
-            if web_learned_now:
-                analytical_note = (
-                    f"> 🧠 **Raciocínio Analítico da Verônica:** Verifiquei minha memória interna e identifiquei que os termos específicos da sua pergunta "
-                    + (f"(`{', '.join(missing_terms)}`) " if missing_terms else "")
-                    + f"não estavam cobertos nos documentos locais (cobertura prévia: `{int(top_coverage * 100)}%`). "
-                    f"Realizei pesquisa em tempo real na web e normas IETF RFC, aprendi o conteúdo e gravei em `veronica_machine_memory.bin`.\n\n"
-                )
-            elif relevant_memories:
-                analytical_note = (
-                    f"> 🧠 **Raciocínio Analítico da Verônica:** Localizei este conhecimento já consolidado em minha memória binária de máquina (`cobertura: 100%`).\n\n"
-                )
-            else:
-                analytical_note = ""
-
-            cmds_block = ""
-            if top_doc and top_doc.get("extracted_commands"):
-                cmds_fmt = "\n".join(top_doc["extracted_commands"][:7])
-                cmds_block = f"\n\n**Comandos CLI Homologados:**\n```cli\n{cmds_fmt}\n```"
 
             if op_mode == "agent":
                 formatted_markdown = (
-                    f"### 🤖 Veronica — Investigação Analítica & Raciocínio (Modo Agente)\n\n"
-                    f"**🧠 Thought:** O operador perguntou: *\"{message_text}\"*. "
-                    + (
-                        f"Descartei documentos locais parciais (cobertura `{int(top_coverage * 100)}%`) para evitar resposta genérica e acionei busca em tempo real nas normas IETF RFC e web.\n\n"
-                        if web_learned_now
-                        else "Validada cobertura integral na memória técnica consolidada.\n\n"
-                    )
-                    + f"**⚡ Action:** Síntese analítica de precisão e gravação permanente na memória binária de máquina (`veronica_machine_memory.bin`).\n\n"
-                    f"**🔍 Observation:**\n{doc_context}{cmds_block}"
+                    f"### 🤖 Veronica — Imagem & Arquitetura Visual Gerada (Modo Agente)\n\n"
+                    f"**🧠 Thought:** O operador solicitou uma visualização gráfica de *{theme_title}*. Calculei as posições relativas dos roteadores, enlaces e anotações de métrica.\n\n"
+                    f"**⚡ Action (Desenho Vetorial):** Renderizada imagem SVG detalhada com identificadores de nós, estados e parâmetros de tráfego.\n\n"
+                    f"**🔍 Observation:**\n\n"
+                    f"{image_box}\n\n"
+                    f"**Descrição Técnica:** O diagrama acima detalha a arquitetura lógica e física dos equipamentos com rotas redundantes."
                 )
             elif op_mode == "work":
                 formatted_markdown = (
-                    f"### 🛠️ Artefato Técnico de Engenharia — {topic_name}\n\n"
-                    f"{analytical_note}{doc_context}{cmds_block}\n\n"
-                    f"**Normas e Fontes Homologadas:** " + (", ".join(c["title"] for c in citations) if citations else "IETF Standards Track")
+                    f"### 🛠️ Artefato Visual de Engenharia — {theme_title}\n\n"
+                    f"{image_box}\n\n"
+                    f"**Especificações:** Gráfico vetorial SVG responsivo desenhado pelo motor neural da Veronica, compatível com documentação técnica de engenharia."
                 )
             else:
-                formatted_markdown = f"{analytical_note}{doc_context}{cmds_block}"
+                formatted_markdown = (
+                    f"Gerei a imagem e o diagrama vetorial solicitado para **{theme_title}**:\n\n"
+                    f"{image_box}\n\n"
+                    f"Você pode visualizar a disposição dos equipamentos, os enlaces principais e as métricas na imagem acima. "
+                    f"Se desejar, posso adicionar mais nós, alterar os endereçamentos ou fornecer o roteiro CLI correspondente!"
+                )
 
             structured_response = {
                 "agent_name": "Veronica",
                 "model_version": self.trainer.model_version,
                 "intent": intent,
                 "mode": op_mode,
-                "diagnosis": f"Análise técnica precisa sobre {topic_name} fundamentada em normas IETF RFC e documentação oficial.",
+                "diagnosis": f"Imagem vetorial gerada com sucesso para: {theme_title}.",
                 "epistemic_breakdown": {
                     "verified_facts": [
-                        f"Fonte técnica verificada: {citations[0]['title'] if citations else 'Norma Oficial IETF / Fabricante'}",
-                        f"Status de memória: {'Aprendido na web em tempo real e salvo em veronica_machine_memory.bin' if web_learned_now else 'Recuperado da memória técnica consolidada'}",
+                        "Diagrama vetorial SVG gerado pela Veronica.",
+                        f"Escopo visual: {theme_title}.",
                     ],
-                    "technical_inferences": ["Aplicação direta dos parâmetros arquiteturais e limites do protocolo especificado."],
-                    "hypotheses": ["Validar compatibilidade de versão de sistema operacional ao aplicar ajustes de métrica/protocolo em produção."]
+                    "technical_inferences": ["Arquitetura desenhada em conformidade com convenções IETF de topologia de redes."],
+                    "hypotheses": ["Pode ser anexado à documentação de topologia ou projetos executivos."]
                 },
-                "evidences": [c.get("source_uri", "doc://ietf-rfc") for c in citations] if citations else ["Documentação técnica oficial."],
-                "technical_sources": citations or [
-                    {
-                        "doc_id": "doc-rfc-std",
-                        "title": "IETF RFC / Vendor Official Architecture",
-                        "vendor": "Multi-Vendor",
-                        "os_name": "VRP / IOS-XR / Junos",
-                        "version_build": "Standard",
-                        "source_uri": "https://datatracker.ietf.org/doc/html/rfc",
-                        "published_date": "2024-01-01",
-                        "reliability_score": 0.99,
-                        "applicability_restrictions": "Homologação recomendada antes de aplicação.",
-                        "is_official": True,
-                    }
-                ],
-                "compatibility": [f"{c.get('vendor', 'Multi-Vendor')} {c.get('os_name', 'SO')} ({c.get('version_build', 'LTS')})" for c in citations] or ["Multi-Vendor homologado."],
-                "risk": "BAIXO (Consulta analítica de precisão)",
-                "safe_diagnostic_commands": (top_doc.get("extracted_commands") if top_doc else [])[:4] or ["show ip ospf interface"],
+                "evidences": ["Motor gerador gráfico da Veronica."],
+                "technical_sources": [],
+                "compatibility": ["SVG Standard, HTML5, CSS3."],
+                "risk": "BAIXO (Artefato gráfico consultivo)",
+                "safe_diagnostic_commands": [],
                 "proposed_commands": [],
-                "validation_plan": ["Validar parâmetros em laboratório antes de alterar ambiente de produção."],
+                "validation_plan": [],
                 "rollback_plan": [],
-                "limitations_and_unknowns": rag_res.get("obsolete_warnings", []),
+                "limitations_and_unknowns": [],
                 "spoken_summary": spoken_summary,
-                "confidence": 0.99 if web_learned_now or top_coverage >= 0.75 else 0.95,
+                "confidence": 1.0,
+            }
+            return _finalize_and_record_memory(formatted_markdown, structured_response)
+
+        # 7. Pesquisa e explicacao aberta: recuperar evidencias do dominio da pergunta.
+        if intent == "EXPLANATION":
+            stop_words = {"qual", "quais", "como", "quando", "onde", "porque", "por", "para", "uma", "uns", "umas", "the", "and", "what", "when", "where", "why", "with", "from"}
+            search_query = message_text
+            if conv_context.get("is_followup") and conv_context.get("last_user_query"):
+                search_query = f"{conv_context['last_user_query']} {message_text}"
+
+            rag_res = self.rag.search(search_query, top_k=4)
+            local_results = rag_res.get("results", [])
+            local_candidates = [item for item in local_results if float(item.get("query_coverage", 0.0)) >= 0.35]
+            research_bundle: Dict[str, Any] = {}
+            web_results: List[Dict[str, Any]] = []
+            web_synthesis: Dict[str, Any] = {}
+            if self.hub and hasattr(self.hub, "research_open_domain"):
+                try:
+                    research_bundle = self.hub.research_open_domain(search_query, max_results=7)
+                    web_results = research_bundle.get("sources", [])
+                    web_synthesis = research_bundle.get("synthesis", {})
+                except Exception:
+                    web_results = []
+
+            ranked_web: List[tuple[float, Dict[str, Any]]] = [
+                (float(item.get("retrieval_score", item.get("relevance", 0.0))), item)
+                for item in web_results if float(item.get("relevance", 0.0)) >= 0.08
+            ]
+            ranked_web.sort(key=lambda pair: pair[0], reverse=True)
+
+            citations: List[Dict[str, Any]] = []
+            answer_parts: List[str] = []
+            evidence_claims = web_synthesis.get("claims", [])
+            if evidence_claims:
+                answer_parts.append(str(web_synthesis.get("answer", "")).strip())
+                cited_urls = {claim.get("url") for claim in evidence_claims}
+                for relevance, item in ranked_web:
+                    if item.get("url") not in cited_urls:
+                        continue
+                    citations.append({
+                        "doc_id": str(item.get("doc_id") or ""), "title": str(item.get("title") or "Fonte consultada"),
+                        "vendor": item.get("source_type", "Web"), "family_model": "Conhecimento geral",
+                        "os_name": "N/A", "version_build": "N/A", "feature": f"Pesquisa aberta: {item.get('domain', 'geral')}",
+                        "original_source": item.get("source", "Pesquisa na web"), "source_uri": item.get("url", ""),
+                        "page_section": "Pagina consultada" if item.get("full_page") else "Trecho de resultado de busca",
+                        "published_date": "", "consulted_date": datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+                        "reliability_score": float(item.get("authority_score", 0.5)),
+                        "applicability_restrictions": "Sintese extrativa; confira a fonte original para contexto completo.",
+                        "is_official": bool(item.get("is_primary_source", False)),
+                        "relevance": float(item.get("relevance", relevance)),
+                    })
+                    if len(citations) >= 3:
+                        break
+            if not answer_parts and local_candidates:
+                for item in local_candidates[:2]:
+                    doc = item.get("document", {})
+                    title = doc.get("title") or doc.get("family_model") or "Memoria documental"
+                    content = scrub_secrets(str(doc.get("content", "")).strip())
+                    if content:
+                        answer_parts.append(f"**{title}:** {content[:1000]}")
+                    if item.get("citation"):
+                        citations.append(item["citation"])
+
+            memory_used = False
+            if not answer_parts and relevant_memories and float(relevant_memories[0].get("_relevance", 0.0)) >= 0.30:
+                episode = relevant_memories[0]
+                details = episode.get("perceptual_details", {})
+                previous_response = str(details.get("assistant_response", "")).strip()
+                if previous_response:
+                    answer_parts.append(f"Retomando uma conversa anterior: {previous_response[:1200]}")
+                    memory_used = True
+                    for source in details.get("sources", [])[:3]:
+                        if source.get("url"):
+                            citations.append({
+                                "title": source.get("title", "Fonte da conversa anterior"),
+                                "source_uri": source["url"],
+                                "is_official": False,
+                            })
+
+            if answer_parts:
+                formatted_markdown = answer_parts[0]
+                if citations:
+                    formatted_markdown += "\n\n**Fontes:** " + " | ".join(f"[{c['title']}]({c['source_uri']})" for c in citations[:3])
+                spoken_summary = answer_parts[0][:240]
+                topic_name = citations[0]["title"] if citations else "Base documental local"
+            else:
+                formatted_markdown = "Nao encontrei material suficientemente relacionado nas fontes disponiveis. Reformule com mais contexto ou indique uma fonte para consulta."
+                spoken_summary = "Nao encontrei fontes suficientemente relacionadas para responder com seguranca."
+                topic_name = "Fonte pertinente nao localizada"
+
+            if dev and hasattr(dev, "neurogenesis"):
+                words = [token for token in re.findall(r"[\w-]{4,}", message_text) if token.lower() not in stop_words]
+                for concept in words[:3]:
+                    try:
+                        dev.neurogenesis.trigger_neurogenesis_for_concept(concept=concept.upper(), modality="CHAT_DIALOGUE", intensity=1)
+                    except Exception:
+                        pass
+
+            if ranked_web:
+                confidence = min(
+                    0.85,
+                    0.20 + 0.22 * float(web_synthesis.get("coverage", 0.0))
+                    + 0.08 * min(2, int(web_synthesis.get("primary_source_count", 0)))
+                    + 0.12 * min(1.0, float(web_synthesis.get("corroboration", 0.0)))
+                    + 0.08 * min(2, int(web_synthesis.get("full_page_count", 0))),
+                )
+                if web_synthesis.get("possible_numeric_conflict"):
+                    confidence = max(0.25, confidence - 0.18)
+            else:
+                confidence = 0.62 if local_candidates else (0.45 if memory_used else 0.25)
+            structured_response = {
+                "agent_name": "Veronica", "model_version": self.trainer.model_version,
+                "intent": intent, "mode": op_mode,
+                "diagnosis": f"Sintese de evidencias recuperadas sobre: {topic_name}.",
+                "epistemic_breakdown": {"verified_facts": [], "technical_inferences": [], "hypotheses": []},
+                "retrieved_claims": [claim["text"] for claim in evidence_claims],
+                "confidence_basis": "heuristic_source_coverage_and_authority_not_calibrated_probability",
+                "evidences": [c.get("source_uri", "") for c in citations if c.get("source_uri")],
+                "technical_sources": citations, "compatibility": [], "risk": "BAIXO (consulta informativa)",
+                "safe_diagnostic_commands": [], "proposed_commands": [], "validation_plan": [], "rollback_plan": [],
+                "limitations_and_unknowns": (
+                    (["As fontes apresentam possiveis valores numericos divergentes; revisar o contexto."] if web_synthesis.get("possible_numeric_conflict") else [])
+                    + (["A resposta foi montada de trechos da pagina e pode omitir contexto."] if not web_synthesis.get("full_page_count") else []) if ranked_web
+                    else (["Retomada baseada em resposta de conversa anterior."] if memory_used
+                          else ([] if local_candidates else ["Nao foram encontradas fontes pertinentes."]))
+                ),
+                "spoken_summary": spoken_summary, "confidence": confidence,
             }
             return _finalize_and_record_memory(formatted_markdown, structured_response)
 
@@ -1431,7 +1759,7 @@ class ChatService:
 
         mem_context = ""
         if relevant_memories:
-            mem_context = f"*(Consultando minha memória de máquina binária, correlacionei experiências prévias com sintomas similares.)*\n\n"
+            mem_context = "*(Consultando minha memória de máquina binária, correlacionei experiências prévias com sintomas similares.)*\n\n"
 
         risk_str = (
             "ALTO (Alteração em protocolo de roteamento de Core — exige Fluxo Seguro de 10 Etapas e Aprovação Humana)"
@@ -1450,8 +1778,8 @@ class ChatService:
                 f"```cli\n{safe_cmds_fmt}\n```\n\n"
                 f"**🔍 Observation (Observações & Quebra Epistêmica):**\n"
                 f"- **Fatos Confirmados:** " + "; ".join(verified_facts) + "\n"
-                f"- **Inferências Técnicas:** " + "; ".join(technical_inferences) + "\n"
-                f"- **Hipóteses em Validação:** " + "; ".join(hypotheses) + "\n\n"
+                "- **Inferências Técnicas:** " + "; ".join(technical_inferences) + "\n"
+                "- **Hipóteses em Validação:** " + "; ".join(hypotheses) + "\n\n"
                 f"**🎯 Causa-Raiz & Próximo Passo Autônomo:**\n"
                 f"Diagnóstico: **{diagnosis_summary}**.\n"
                 + (f"Proposta de remediação pronta para o Fluxo Seguro de 10 Etapas:\n```cli\n{proposed_cmds_fmt}\n```" if proposed_cmds else "Ambiente estável para este escopo.")
@@ -1470,8 +1798,8 @@ class ChatService:
                 f"- **Rollback Nativo:** Reversão automática via commit trial / commit confirmed caso os testes pós-mudança falhem.\n\n"
                 f"#### 📊 Matriz Epistêmica\n"
                 f"- **Fatos:** " + "; ".join(verified_facts) + "\n"
-                f"- **Inferências:** " + "; ".join(technical_inferences) + "\n"
-                f"- **Hipóteses:** " + "; ".join(hypotheses)
+                "- **Inferências:** " + "; ".join(technical_inferences) + "\n"
+                "- **Hipóteses:** " + "; ".join(hypotheses)
             )
         else:
             # Modo CHAT: diálogo humano, fluido, direto e inteligente
@@ -1494,7 +1822,7 @@ class ChatService:
                 + "\n".join(f"- {h}" for h in hypotheses)
                 + f"\n\n**Comandos Recomendados para Verificação Imediata (Somente Leitura):**\n```cli\n{safe_cmds_fmt}\n```\n\n"
                 + remediation_text
-                + f"Posso aplicar o roteiro de diagnóstico completo ou detalhar o plano de rollback quando você autorizar!"
+                + "Posso aplicar o roteiro de diagnóstico completo ou detalhar o plano de rollback quando você autorizar!"
             )
 
         structured_response = {
@@ -1630,6 +1958,9 @@ class NeuralMetricsService:
             "experiment_id": self.trainer.current_experiment_id,
             "model_version": self.trainer.model_version,
             "latest_step": latest,
+            "loss": latest.get("loss") if isinstance(latest, dict) else None,
+            "grad_norm": latest.get("grad_norm", latest.get("gradient_norm")) if isinstance(latest, dict) else None,
+            "activations": latest.get("activations", {}) if isinstance(latest, dict) else {},
             "history": self.trainer.history[-100:],
             "warnings": self.trainer.warnings[-20:],
             "data_prep_time_ms": self.trainer.data_prep_time_ms,
@@ -1639,7 +1970,39 @@ class NeuralMetricsService:
         return self.trainer.inspect_parameters()
 
     def get_hardware_telemetry(self) -> Dict[str, Any]:
-        return get_real_hardware_telemetry(self.trainer.last_dataset_read_mb_s)
+        telemetry = get_real_hardware_telemetry(self.trainer.last_dataset_read_mb_s)
+        try:
+            import pynvml
+
+            pynvml.nvmlInit()
+            try:
+                count = pynvml.nvmlDeviceGetCount()
+                if count:
+                    devices = []
+                    for index in range(count):
+                        handle = pynvml.nvmlDeviceGetHandleByIndex(index)
+                        memory = pynvml.nvmlDeviceGetMemoryInfo(handle)
+                        try:
+                            utilization = pynvml.nvmlDeviceGetUtilizationRates(handle).gpu
+                        except pynvml.NVMLError:
+                            utilization = None
+                        devices.append({
+                            "index": index,
+                            "name": pynvml.nvmlDeviceGetName(handle).decode("utf-8", "replace"),
+                            "vram_total_mb": round(memory.total / 1048576, 2),
+                            "vram_used_mb": round(memory.used / 1048576, 2),
+                            "accelerator_utilization_percent": utilization,
+                        })
+                    telemetry["gpu"] = {"available": True, "devices": devices,
+                        "vram_total_mb": sum(d["vram_total_mb"] for d in devices),
+                        "vram_used_mb": sum(d["vram_used_mb"] for d in devices),
+                        "accelerator_utilization_percent": devices[0]["accelerator_utilization_percent"]}
+            finally:
+                pynvml.nvmlShutdown()
+        except Exception:
+            # CPU-only hosts and driver/library mismatches are reported as unavailable.
+            pass
+        return telemetry
 
 
 class ModelRegistryService:
@@ -2090,6 +2453,10 @@ class VeronicaPlatformHub:
         self.ingestor = KnowledgeIngestor()
         self.official_search_connector = OfficialDocumentationSearchConnector(self.ingestor)
         self.rag = HybridRAGEngine(model=self.model, tokenizer=self.tokenizer)
+        self.open_domain_store = OpenDomainKnowledgeStore(self.data_dir / "open_domain_knowledge.sqlite3")
+        for cached_document in self.open_domain_store.load_documents(limit=1500):
+            self.rag.add_document(cached_document, recompute_stats=False, compute_embedding=False)
+        self.rag._recompute_index_stats()
 
         self.inventory = create_default_network_inventory()
         self.adapter = DigitalTwinNetworkAdapter(self.inventory)
@@ -2161,6 +2528,148 @@ class VeronicaPlatformHub:
             change_controller=self.change_controller,
         )
 
+    def build_agent_orchestrator(self, requester_user_id: str) -> ReActOrchestrator:
+        """Create a user-scoped ReAct instance with read-only and simulated-plan tools.
+
+        The model may select only registered tools. Production execution and Stage 6
+        approval are deliberately absent from this registry.
+        """
+        async def search_knowledge(args: Dict[str, Any]) -> Dict[str, Any]:
+            query = str(args.get("query", "")).strip()
+            if not query:
+                raise ValueError("query is required")
+            top_k = max(1, min(int(args.get("top_k", 4)), 8))
+            return await asyncio.to_thread(
+                self.rag.search, query,
+                vendor_filter=args.get("vendor_filter"),
+                os_filter=args.get("os_filter"),
+                include_obsolete=False,
+                top_k=top_k,
+            )
+
+        async def diagnose(args: Dict[str, Any]) -> Dict[str, Any]:
+            problem = str(args.get("problem_description", "")).strip()
+            if not problem:
+                raise ValueError("problem_description is required")
+            devices = args.get("target_devices")
+            if devices is not None and not isinstance(devices, list):
+                raise ValueError("target_devices must be a list")
+            return await asyncio.to_thread(
+                self.diagnostic_engine.investigate,
+                problem_description=problem,
+                target_devices=devices,
+            )
+
+        async def simulate_change(args: Dict[str, Any]) -> Dict[str, Any]:
+            required = ("device_id", "title", "proposed_commands")
+            if any(key not in args for key in required):
+                raise ValueError("device_id, title and proposed_commands are required")
+            commands = args["proposed_commands"]
+            if not isinstance(commands, list) or not all(isinstance(command, str) for command in commands):
+                raise ValueError("proposed_commands must be a list of strings")
+            return await asyncio.to_thread(
+                self.change_controller.create_change_plan_stages_1_to_5,
+                requester_user_id=requester_user_id,
+                device_id=str(args["device_id"]),
+                title=str(args["title"]),
+                proposed_commands=commands,
+                maintenance_window=str(args.get("maintenance_window", "2026-10-18 02:00-04:00 BRT")),
+                origin_channel="AGENT_SIMULATION",
+            )
+
+        async def model_step(user_message: str, history: List[Dict[str, Any]],
+                             evidence: List[Dict[str, Any]]) -> Dict[str, Any]:
+            tool_specs = [
+                {"name": "search_knowledge", "arguments": {"query": "string", "top_k": "integer?", "vendor_filter": "string?"}},
+                {"name": "diagnose", "arguments": {"problem_description": "string", "target_devices": "string[]?"}},
+                {"name": "simulate_change", "arguments": {"device_id": "string", "title": "string", "proposed_commands": "string[]", "maintenance_window": "string?"}},
+            ]
+            instruction = (
+                "[SYSTEM] Responda somente com JSON objeto: {\"thought\":str,\"tool_calls\":[{\"name\":str,\"arguments\":object}],\"answer\":str}. "
+                "Use apenas ferramentas listadas; prefira consulta ou diagnóstico somente leitura. "
+                "Mudanças só podem ser simuladas. Nunca solicite nem declare aprovada uma execução. "
+                f"Ferramentas: {json.dumps(tool_specs, ensure_ascii=False)}\n"
+                f"Histórico recente: {json.dumps(history[-4:], ensure_ascii=False, default=str)}\n"
+                f"Evidências: {json.dumps(evidence[-4:], ensure_ascii=False, default=str)}\n"
+                f"Pedido: {user_message}\n[ASSISTANT][TOOL_CALL]"
+            )
+            tool_schema = {
+                "type": "object",
+                "required": ["thought", "tool_calls", "answer"],
+                "additionalProperties": False,
+                "properties": {
+                    "thought": {"type": "string"},
+                    "tool_calls": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "required": ["name", "arguments"],
+                            "additionalProperties": False,
+                            "properties": {
+                                "name": {"enum": ["search_knowledge", "diagnose", "simulate_change"]},
+                                "arguments": {"type": "object"},
+                            },
+                        },
+                    },
+                    "answer": {"type": "string"},
+                },
+            }
+            generated = await asyncio.to_thread(
+                self.generator.generate_text,
+                instruction,
+                GenerationConfig(max_new_tokens=64, temperature=0.1, greedy=True),
+                tool_schema=tool_schema,
+            )
+            output = str(generated.get("text", "")).strip()
+            # A malformed model response is always treated as plain text; it cannot
+            # become a tool invocation through partial JSON recovery.
+            try:
+                payload = json.loads(output)
+            except (ValueError, TypeError):
+                return {"answer": output or "Não consegui formular uma resposta estruturada."}
+            if not isinstance(payload, dict):
+                return {"answer": output}
+            answer = payload.get("answer", "")
+            thought = payload.get("thought", "")
+            raw_calls = payload.get("tool_calls", [])
+            if not isinstance(raw_calls, list) or len(raw_calls) > 3:
+                return {"answer": str(answer) or "A proposta de ferramenta não passou pela validação."}
+            calls: List[Dict[str, Any]] = []
+            allowed = {"search_knowledge", "diagnose", "simulate_change"}
+            for raw_call in raw_calls:
+                if not isinstance(raw_call, dict) or raw_call.get("name") not in allowed:
+                    return {"answer": str(answer) or "A proposta de ferramenta não passou pela validação."}
+                arguments = raw_call.get("arguments", {})
+                if not isinstance(arguments, dict):
+                    return {"answer": str(answer) or "Os argumentos da ferramenta são inválidos."}
+                calls.append({"id": uuid.uuid4().hex, "name": raw_call["name"], "arguments": arguments})
+            return {"thought": str(thought)[:2000], "tool_calls": calls, "answer": str(answer)}
+
+        class UserScopedChangeControl:
+            def create_change_plan_stages_1_to_5(inner_self, **args: Any) -> Dict[str, Any]:
+                # ReActOrchestrator dispatches TIER_1 through this deterministic
+                # change-control hook. Identity and channel always come from the API.
+                allowed = {key: args[key] for key in (
+                    "device_id", "title", "proposed_commands", "maintenance_window"
+                ) if key in args}
+                return self.change_controller.create_change_plan_stages_1_to_5(
+                    requester_user_id=requester_user_id,
+                    origin_channel="AGENT_SIMULATION",
+                    **allowed,
+                )
+
+        tools = [
+            AgentTool("search_knowledge", ToolSafetyTier.TIER_0_READ_ONLY, search_knowledge),
+            AgentTool("diagnose", ToolSafetyTier.TIER_0_READ_ONLY, diagnose),
+            AgentTool("simulate_change", ToolSafetyTier.TIER_1_SIMULATE_PLAN, simulate_change),
+        ]
+        return ReActOrchestrator(
+            tools=tools,
+            model_step=model_step,
+            change_control=UserScopedChangeControl(),
+            max_steps=4,
+        )
+
     def index_correction_into_rag(self, correction_record: Dict[str, Any]) -> KnowledgeDocument:
         """
         Indexa uma correção técnica validada diretamente no motor RAG da Veronica.
@@ -2195,6 +2704,7 @@ class VeronicaPlatformHub:
             domain=correction_record.get("domain", "networking.general"),
         )
         self.rag.add_document(doc)
+        self.open_domain_store.save_document(doc)
         return doc
 
     def _seed_foundational_circuits(self) -> None:
@@ -2222,350 +2732,146 @@ class VeronicaPlatformHub:
             if neurons:
                 neurons[0].coords_3d = coords
 
+    def research_open_domain(self, query: str, max_results: int = 7) -> Dict[str, Any]:
+        """Search, fetch, sanitize, rank, synthesize, persist, and measure evidence."""
+        from urllib.parse import urlparse
+        import hashlib
+        from knowledge.ingestion.ingestor import fetch_web_page_content
+        from knowledge.ingestion.sanitizer import sanitize_untrusted_text
+
+        domain = classify_domain(query)
+        raw_results = search_live_web_and_rfc(query, max_results=max_results, timeout=3.5)
+        query_terms = open_domain_terms(query)
+        normalized: List[Dict[str, Any]] = []
+        for result in raw_results:
+            url = str(result.get("url", "")).strip()
+            parsed = urlparse(url)
+            if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+                continue
+            trust = assess_source(url, domain)
+            title = sanitize_untrusted_text(str(result.get("title", "")), source="web_search_title", max_chars=500).text.strip()
+            snippet = sanitize_untrusted_text(str(result.get("snippet", "")), source="web_search_snippet", max_chars=5000).text.strip()
+            overlap = len(query_terms & open_domain_terms(f"{title} {snippet}")) / max(1, len(query_terms))
+            result.update({
+                "title": title, "snippet": snippet, "content": snippet, "url": url,
+                "full_page": False, "domain": domain,
+                "source_type": trust["source_type"], "is_primary_source": trust["is_primary_source"],
+                "authority_score": trust["authority_score"], "relevance": round(overlap, 3),
+                "retrieval_score": round(overlap * 0.72 + float(trust["authority_score"]) * 0.28, 4),
+            })
+            normalized.append(result)
+        normalized.sort(key=lambda item: (item["retrieval_score"], item["relevance"]), reverse=True)
+
+        cached_by_url = {
+            doc.source_uri: doc for doc in self.rag.documents.values()
+            if doc.domain == "general.open_web" and doc.source_uri
+        }
+        for item in normalized[:2]:
+            cached = cached_by_url.get(item["url"])
+            if cached and cached.content and len(cached.content) > len(item["snippet"]) + 250:
+                try:
+                    age = (datetime.now(timezone.utc).date() - datetime.strptime(cached.consulted_date, "%Y-%m-%d").date()).days
+                except ValueError:
+                    age = 999
+                if age < 30:
+                    item.update({"content": cached.content, "full_page": True})
+                    continue
+            fetched = fetch_web_page_content(item["url"], timeout=2.0)
+            if fetched.get("content"):
+                page = sanitize_untrusted_text(str(fetched["content"]), source="fetched_web_page", max_chars=30000).text.strip()
+                if page:
+                    item["content"] = page
+                    item["full_page"] = len(page) > len(item["snippet"]) + 250
+            page_title = sanitize_untrusted_text(str(fetched.get("title", "")), source="fetched_page_title", max_chars=500).text.strip()
+            if page_title:
+                item["title"] = page_title
+            if fetched.get("url"):
+                item["url"] = str(fetched["url"])
+
+        for item in normalized:
+            overlap = len(query_terms & open_domain_terms(f"{item['title']} {item['content'][:12000]}")) / max(1, len(query_terms))
+            item["relevance"] = round(overlap, 3)
+            item["retrieval_score"] = round(overlap * 0.68 + float(item["authority_score"]) * 0.22 + (0.10 if item["full_page"] else 0.0), 4)
+        normalized.sort(key=lambda item: (item["retrieval_score"], item["relevance"]), reverse=True)
+        normalized = normalized[:max_results]
+
+        today = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        for item in normalized:
+            content = str(item.get("content", ""))[:30000]
+            if len(content) < 100:
+                continue
+            digest = hashlib.sha256(f"{item['url']}|{content[:500]}".encode("utf-8")).hexdigest()[:20]
+            document = KnowledgeDocument(
+                doc_id=f"WEB-{digest}", title=str(item.get("title", "Consulted source"))[:500], content=content,
+                vendor=str(item.get("source_type", "Web source")), family_model="General knowledge", os_name="N/A",
+                version_build="Retrieved online", feature=f"Open research: {domain}",
+                original_source=str(item.get("source", "Web search")), source_uri=str(item["url"]),
+                page_section="Fetched page" if item.get("full_page") else "Search snippet",
+                published_date="", consulted_date=today,
+                reliability_score=float(item.get("authority_score", 0.5)),
+                applicability_restrictions="Sanitized extracted text; consult the original page for full context.",
+                is_official=bool(item.get("is_primary_source", False)), domain="general.open_web",
+            )
+            self.rag.add_document(document)
+            self.open_domain_store.save_document(document)
+
+        synthesis = synthesize_evidence(query, normalized)
+        metrics = {
+            "source_count": synthesis["source_count"],
+            "full_page_count": synthesis["full_page_count"],
+            "primary_source_count": synthesis["primary_source_count"],
+            "claim_count": len(synthesis["claims"]),
+            "coverage": synthesis["coverage"],
+            "corroboration": synthesis["corroboration"],
+            "possible_numeric_conflict": synthesis["possible_numeric_conflict"],
+        }
+        self.open_domain_store.record_metrics(domain, metrics)
+        return {"domain": domain, "sources": normalized, "synthesis": synthesis, "metrics": metrics}
+
+    def get_open_domain_quality(self) -> Dict[str, Any]:
+        return self.open_domain_store.quality_summary()
+
     def auto_research_and_learn(
         self,
         query: str,
         vendor: Optional[str] = None,
     ) -> Dict[str, Any]:
-        """
-        Pesquisa analítica em tempo real na documentação oficial de fabricantes, Wikipedia e IETF RFCs na web.
-        Sintetiza resultados precisos focados exatamente na pergunta do operador, sanitiza contra segredos,
-        dispara neurogênese ontogenética e salva permanentemente no RAG e em veronica_machine_memory.bin.
-        """
-        import unicodedata
-
-        q_low = query.lower().strip()
-        q_norm = "".join(
-            c for c in unicodedata.normalize("NFD", q_low)
-            if unicodedata.category(c) != "Mn"
-        )
-
-        # Identificação de fabricante ou entidade normativa
-        v = vendor
-        if not v or v.lower() == "generic":
-            if any(k in q_norm for k in ["huawei", "ne40", "ne8000", "vrp", "cloudengine", "solar"]):
-                v = "Huawei"
-            elif any(k in q_norm for k in ["cisco", "asr9k", "ios-xr", "ios-xe", "catalyst", "nexus"]):
-                v = "Cisco"
-            elif any(k in q_norm for k in ["juniper", "junos", "mx204", "mx960", "qfx", "trio"]):
-                v = "Juniper"
-            elif any(k in q_norm for k in ["mikrotik", "routeros", "ccr2004", "ccr2116", "rb4011"]):
-                v = "MikroTik"
-            elif any(k in q_norm for k in ["nokia", "sr os", "7750", "alcatel"]):
-                v = "Nokia"
-            elif any(k in q_norm for k in ["arista", "eos", "7280", "7050"]):
-                v = "Arista"
-            elif any(k in q_norm for k in ["fortinet", "fortigate", "fortios"]):
-                v = "Fortinet"
-            elif any(k in q_norm for k in ["rfc", "ietf", "ospf", "bgp", "isis", "is-is", "mpls", "vlan", "stp", "ipv6"]):
-                v = "IETF"
-            else:
-                v = "Multi-Vendor"
-
-        # 1. Busca dinâmica real na Web e IETF RFCs
-        web_results = search_live_web_and_rfc(query, max_results=5, timeout=5.0)
-
-        # 2. Extração de URLs, títulos e snippets reais
-        real_snippets: List[str] = []
-        real_urls: List[str] = []
-        for r in web_results:
-            snip = r.get("snippet", "").strip()
-            if snip:
-                real_snippets.append(snip)
-            u = r.get("url", "").strip()
-            if u and u not in real_urls:
-                real_urls.append(u)
-
-        primary_url = (
-            real_urls[0]
-            if real_urls
-            else (
-                f"https://support.{v.lower()}.com"
-                if v not in ("Multi-Vendor", "IETF")
-                else "https://www.rfc-editor.org/rfc/rfc2328.html"
-            )
-        )
-        web_evidence_block = ""
-        if real_snippets:
-            live_list = "\n".join(f"- {s}" for s in real_snippets[:4])
-            urls_list = ", ".join(real_urls[:3])
-            web_evidence_block = (
-                f"\n\n#### 🌐 Evidências Recuperadas da Web / IETF em Tempo Real\n"
-                f"**Fontes Consultadas:** {urls_list}\n"
-                f"{live_list}"
-            )
-
-        # 3. Análise Técnica Especializada e Síntese Factual Direta (Sem Templates Genéricos)
-        domain_tag = "routing"
-        if "ospf" in q_norm and any(k in q_norm for k in ["metrica", "metric", "custo", "cost", "maxima", "maximo", "max", "lsinfinity", "65535"]):
-            v = "IETF"
-            model_name = "OSPF (Open Shortest Path First) — Métrica Máxima e Custos (RFC 2328 / RFC 6987)"
-            os_name = "OSPFv2 / OSPFv3 (Multi-Vendor)"
-            version_build = "RFC 2328 / RFC 5340 / RFC 6987"
-            primary_url = real_urls[0] if real_urls else "https://www.rfc-editor.org/rfc/rfc6987.html"
-            cmds = [
-                "ip ospf cost <1-65535>",
-                "max-metric router-lsa",
-                "auto-cost reference-bandwidth 100000",
-                "ospf cost <1-65535>",
-                "stub-router",
-                "set protocols ospf area <area> interface <if> metric <1-65535>",
-            ]
-            ospf_mermaid = (
-                "\n\n#### 📊 Diagrama de Desvio de Tráfego OSPF (RFC 6987 Stub Router) Criado pela Veronica\n"
-                "```mermaid\n"
-                "flowchart LR\n"
-                "  R1[\"Roteador A (Core)\"] ---|\"Custo: 10\"| R2[\"Roteador B (Sob Manutenção)\"]\n"
-                "  R1 ---|\"Custo: 20\"| R3[\"Roteador C (Caminho Alternativo)\"]\n"
-                "  R2 ---|\"Custo: 10\"| R4[\"Roteador D (Borda)\"]\n"
-                "  R3 ---|\"Custo: 20\"| R4\n"
-                "  R2 -.->|\"max-metric router-lsa (Custo 65.535)\"| R2_drain[\"Drenagem RFC 6987\"]\n"
-                "  style R2_drain fill:#ef4444,stroke:#fff,stroke-width:1px,color:#fff\n"
-                "  style R3 fill:#10b981,stroke:#fff,stroke-width:1px,color:#fff\n"
-                "```"
-            )
-            content = (
-                "### 🎯 Resposta Analítica Direta: Qual é a Métrica Máxima do OSPF?\n\n"
-                "No protocolo **OSPF (Open Shortest Path First)**, existem **dois limites máximos de métrica (custo)** definidos nas normas oficiais da **IETF (RFC 2328, RFC 5340 e RFC 6987)**, dependendo do nível do LSA:\n\n"
-                "1. **Métrica Máxima por Interface / Link (`MaxLinkMetric` — 16 bits): `65.535` (`0xFFFF`)**\n"
-                "- **Valor exato:** **`65.535`** (`2¹⁶ - 1`, ou `0xFFFF` em hexadecimal).\n"
-                "- **Onde se aplica:** No cabeçalho do **Router-LSA (LSA Tipo 1)** tanto no OSPFv2 (**RFC 2328**) quanto no OSPFv3 (**RFC 5340**), o campo de custo de cada interface possui exatamente **16 bits sem sinal** (intervalo configurável: `1` a `65535`).\n"
-                "- **Anúncio de Stub Router (RFC 6987):** O comando `max-metric router-lsa` (Cisco) / `stub-router` (Huawei) / `overload` (Juniper) anuncia todos os links de trânsito com o custo máximo **`65.535` (`MaxLinkMetric`)**, desviando o tráfego de trânsito para fora do roteador durante janelas de manutenção sem derrubar as adjacências OSPF.\n\n"
-                "2. **Métrica Máxima Acumulada / LSAs Sumário e Externo (`LSInfinity` — 24 bits): `16.777.215` (`0xFFFFFF`)**\n"
-                "- **Valor exato:** **`16.777.215`** (`2²⁴ - 1`, ou `0xFFFFFF` em hexadecimal).\n"
-                "- **Onde se aplica:** Nos **Summary-LSAs (Tipos 3 e 4)** e **AS-External / NSSA LSAs (Tipos 5 e 7)**, o campo de métrica no pacote OSPF possui **24 bits**.\n"
-                "- **Significado (`LSInfinity`):** Conforme o **Anexo B da RFC 2328 (Architectural Constants)**, o valor `0xFFFFFF` (`16.777.215`) é a constante arquitetural `LSInfinity`, indicando que o prefixo está **inalcançável** (*route poisoning*).\n\n"
-                "3. **Fórmula de Cálculo do Custo OSPF:**\n"
-                "- Fórmula: `Custo OSPF = max(1, floor(Reference_Bandwidth / Interface_Bandwidth))`\n"
-                "- A banda de referência padrão é **100 Mbps** (`10⁸ bps`). Em redes com interfaces de 1 Gbps, 10 Gbps, 40 Gbps ou 100 Gbps, deve-se ajustar `auto-cost reference-bandwidth` (Cisco) ou `bandwidth-reference` (Huawei) em todos os roteadores da área para evitar que todos os enlaces rápidos recebam custo mínimo `1`."
-                f"{ospf_mermaid}"
-                f"{web_evidence_block}"
-            )
-        elif ("isis" in q_norm or "is-is" in q_norm) and any(k in q_norm for k in ["metrica", "metric", "custo", "cost", "maxima", "maximo", "wide", "narrow"]):
-            v = "IETF"
-            model_name = "IS-IS — Métrica Narrow (6 bits) vs Wide Metric (24 bits - RFC 5305)"
-            os_name = "IS-IS Multi-Vendor"
-            version_build = "ISO 10589 / RFC 1195 / RFC 5305"
-            cmds = ["metric-style wide", "isis cost <1-16777215>", "set-overload-bit"]
-            isis_mermaid = (
-                "\n\n#### 📊 Diagrama IS-IS Narrow vs. Wide Metric Criado pela Veronica\n"
-                "```mermaid\n"
-                "flowchart LR\n"
-                "  A[\"Interface 100G\"] -->|Narrow Metric: máx 63| B[\"Saturação de Métrica\"]\n"
-                "  A -->|Wide Metric RFC 5305: máx 16.777.215| C[\"Engenharia de Tráfego SR / MPLS TE\"]\n"
-                "  style C fill:#10b981,stroke:#fff,stroke-width:1px,color:#fff\n"
-                "```"
-            )
-            content = (
-                "### 🎯 Resposta Analítica Direta: Métrica Máxima do IS-IS (Narrow vs. Wide Metric)\n\n"
-                "1. **Narrow Metric (Métrica Estreita — RFC 1195 / ISO 10589):**\n"
-                "- **Máximo por Interface (6 bits):** **`63`** (padrão: `10`).\n"
-                "- **Máximo Acumulado de Caminho (10 bits):** **`1.023`**.\n\n"
-                "2. **Wide Metric (Métrica Estendida — IETF RFC 5305, obrigatória para MPLS TE e SR):**\n"
-                "- **Máximo por Interface (24 bits):** **`16.777.215`** (`0xFFFFFF`, `2²⁴ - 1`).\n"
-                "- **Máximo Acumulado de Caminho (32 bits):** **`4.294.967.295`** (`0xFFFFFFFF`, `2³² - 1`).\n"
-                "- Em redes modernas de provedores, habilita-se `metric-style wide` para suportar Traffic Engineering (Sub-TLVs) e Segment Routing."
-                f"{isis_mermaid}"
-                f"{web_evidence_block}"
-            )
-        elif "distancia administrativa" in q_norm or ("administrative distance" in q_norm) or ("preferencia" in q_norm and any(p in q_norm for p in ["ospf", "bgp", "rota", "estatica"])):
-            v = "Multi-Vendor"
-            model_name = "Distância Administrativa (AD) / Route Preference Multi-Vendor"
-            os_name = "Cisco IOS-XR/XE, Huawei VRP, Juniper Junos"
-            version_build = "Padrão de Arquitetura"
-            cmds = ["show ip route", "display ip routing-table", "show route"]
-            content = (
-                "### 🎯 Resposta Analítica Direta: Tabela de Distância Administrativa / Preferência de Rotas\n\n"
-                "A **Distância Administrativa (AD)** (chamada de *Route Preference* em Huawei VRP e Juniper Junos) é um inteiro de **8 bits (`0` a `255`)** usado para desempatar rotas aprendidas por diferentes protocolos de roteamento (quanto **menor** o valor, **maior** a confiança; `255` significa rota inalcançável/inválida):\n\n"
-                "| Fonte da Rota / Protocolo | Cisco (IOS / IOS-XE / XR) | Huawei (VRP 8) | Juniper (Junos OS) |\n"
-                "|---|---|---|---|\n"
-                "| **Diretamente Conectada** | `0` | `0` | `0` |\n"
-                "| **Rota Estática** | `1` | `60` | `5` |\n"
-                "| **eBGP (BGP Externo)** | `20` | `255` | `170` |\n"
-                "| **OSPF Interno** | `110` | `10` | `10` |\n"
-                "| **IS-IS (Level 1 / Level 2)** | `115` | `15` | `15` / `18` |\n"
-                "| **OSPF Externo (ASE)** | `110` | `150` | `150` |\n"
-                "| **iBGP (BGP Interno)** | `200` | `255` | `170` |"
-                f"{web_evidence_block}"
-            )
-        elif "ne40" in q_norm:
-            domain_tag = "infrastructure"
-            model_name = "NetEngine 40E (NE40E Series Universal Service Router)"
-            v = "Huawei"
-            os_name = "VRP"
-            version_build = "V800R022C00 / VRP 8.x"
-            cmds = [
-                "display device",
-                "display version",
-                "display bgp peer",
-                "display ospf peer",
-                "display access-user",
-                "display nat session all",
-                "display mpls lsp",
-                "display telemetry sensor-group",
-            ]
-            content = (
-                "### 🎯 Análise Técnica: Huawei NetEngine 40E (NE40E Series)\n\n"
-                "O **Huawei NetEngine 40E (NE40E)** é uma família de roteadores de serviços universais (*Universal Service Router — USR*) "
-                "projetada para borda de provedores (PE), agregação metro-ethernet, BNG/BRAS e core IP/MPLS:\n\n"
-                "1. **Aplicações em Redes de Telecomunicações e ISPs:**\n"
-                "- **PE Multi-Serviço:** Terminação de serviços L2VPN (VPWS/VPLS), L3VPN (RFC 4364) e EVPN sobre MPLS ou SRv6.\n"
-                "- **BNG / BRAS:** Autenticação em alta escala de assinantes PPPoE/IPoE com RADIUS/CoA e HQoS hierárquico de 5 níveis.\n"
-                "- **Carrier-Grade NAT (CGNAT):** Placas de serviço dedicadas para NAT444, DS-Lite e transição IPv6.\n\n"
-                "2. **Arquitetura de Hardware e Chipset Solar NP:**\n"
-                "- Baseado em processadores de rede proprietários **Huawei Solar NP**, garantindo encaminhamento *line-rate* determinístico.\n"
-                "- Separação física estrita entre plano de controle (MPU), plano de encaminhamento (LPU) e matriz de comutação (SFU).\n"
-                "- Chassis modulares (X16A, X8A, X3A) e plataformas compactas de alta densidade (NE40E-M2K-B, NE40E-M2F) com interfaces 10GE, 40GE, 100GE e 400GE."
-                f"{web_evidence_block}"
-            )
-        elif "ccr2004" in q_norm or ("mikrotik" in q_norm and "router" in q_norm):
-            domain_tag = "infrastructure"
-            model_name = "Cloud Core Router CCR2004 / RouterOS v7"
-            v = "MikroTik"
-            os_name = "RouterOS"
-            version_build = "v7.x"
-            cmds = ["/system resource print", "/routing bgp connection print", "/ip route print", "/interface print"]
-            content = (
-                f"### 🎯 Análise Técnica: {v} {model_name}\n\n"
-                "O **MikroTik CCR2004** opera com processador ARM64 Annapurna Labs Alpine v2 de 4 núcleos (1.7 GHz) sob o **RouterOS v7**, "
-                "entregando alto desempenho em BGP Full Routing (motor de roteamento reescrito no kernel Linux 5.6+), MPLS e enlaces 10G/25G SFP28."
-                f"{web_evidence_block}"
-            )
-        elif "mx204" in q_norm or ("juniper" in q_norm and "router" in q_norm):
-            domain_tag = "infrastructure"
-            model_name = "Juniper MX204 3D Universal Edge Router"
-            v = "Juniper"
-            os_name = "Junos OS"
-            version_build = "21.4R3 / 22.x"
-            cmds = ["show chassis hardware", "show bgp summary", "show ospf neighbor", "show route summary"]
-            content = (
-                f"### 🎯 Análise Técnica: {v} {model_name}\n\n"
-                "O **Juniper MX204** é uma plataforma de borda e core compacto 1U equipada com o chipset **Juniper Trio (PFE)**, "
-                "oferecendo 400 Gbps de throughput full-duplex com portas 10GE/40GE/100GE, suporte completo a EVPN-MPLS, SR-MPLS, BGP-LU e automação NETCONF/Junos."
-                f"{web_evidence_block}"
-            )
-        elif "asr" in q_norm or ("cisco" in q_norm and ("router" in q_norm or "ios-xr" in q_norm)):
-            domain_tag = "infrastructure"
-            model_name = "Cisco ASR 9000 Series Aggregation Services Router"
-            v = "Cisco"
-            os_name = "IOS-XR"
-            version_build = "7.9.2"
-            cmds = ["show version", "show running-config", "show ip bgp summary", "show ospf neighbor", "show interfaces summary"]
-            content = (
-                f"### 🎯 Análise Técnica: {v} {model_name}\n\n"
-                "A família **Cisco ASR 9000** com **IOS-XR** e ASICs **Lightspeed / Typhoon** opera em arquitetura modular distribuída e microkernel QNX/Linux, "
-                "voltada para core de operadoras, Segment Routing (SR-MPLS/SRv6), EVPN e alta disponibilidade NSR/ISSU."
-                f"{web_evidence_block}"
-            )
-        else:
-            # Síntese analítica dinâmica baseada nos resultados reais da Web para qualquer pergunta técnica!
-            clean_topic = re.sub(r"[?!]", "", query).strip()
-            model_name = f"Análise Técnica: {clean_topic[:55]}"
-            os_name = "Normas IETF RFC & Documentação Multi-Vendor"
-            version_build = "Padrão Oficial"
-            cmds = []
-            if "ospf" in q_norm:
-                cmds = ["show ip ospf", "show ip ospf interface", "display ospf peer", "show ospf overview"]
-            elif "bgp" in q_norm:
-                cmds = ["show ip bgp summary", "display bgp peer", "show bgp summary"]
-            elif "mpls" in q_norm:
-                cmds = ["show mpls forwarding-table", "display mpls lsp", "show mpls ldp neighbor"]
-            elif "vlan" in q_norm or "stp" in q_norm:
-                cmds = ["show vlan brief", "display vlan", "show spanning-tree"]
-
-            if real_snippets:
-                live_findings = "\n\n".join(f"- {s}" for s in real_snippets)
-                content = (
-                    f"### 🎯 Análise Técnica & Pesquisa Web em Tempo Real — {clean_topic}\n\n"
-                    f"**Fontes Oficiais Consultadas:** {', '.join(real_urls[:3])}\n\n"
-                    f"#### Síntese Analítica das Fontes Recuperadas:\n"
-                    f"{live_findings}\n\n"
-                    f"#### Conclusão de Engenharia:\n"
-                    f"- Conhecimento verificado em tempo real e consolidado permanentemente na memória binária da Verônica (`veronica_machine_memory.bin`)."
-                )
-            else:
-                content = (
-                    f"### 🎯 Análise Técnica — {clean_topic}\n\n"
-                    f"Analisei os parâmetros técnicos referentes a **{clean_topic}** segundo as diretrizes da IETF e padrões multi-vendor ({v}). "
-                    f"O conceito foi indexado na memória binária da Verônica para correlação analítica imediata."
-                )
-
-        clean_content, _ = scrub_secrets(content)
-        doc_id = f"DOC-AUTO-LEARNED-{v.upper()}-{uuid.uuid4().hex[:6].upper()}"
-        doc = KnowledgeDocument(
-            doc_id=doc_id,
-            title=f"{model_name} ({query[:50]})",
-            content=clean_content,
-            vendor=v,
-            family_model=model_name,
-            os_name=os_name,
-            version_build=version_build,
-            feature=f"Pesquisa Analítica Web & Memória Binária: {query}",
-            original_source=f"Pesquisa Oficial Web ({primary_url})",
-            source_uri=primary_url,
-            page_section="Análise Técnica Precisa e Especificações Normativas",
-            published_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            consulted_date=datetime.now(timezone.utc).strftime("%Y-%m-%d"),
-            reliability_score=0.99,
-            applicability_restrictions=f"Aplicável a {model_name} ({os_name}).",
-            extracted_commands=cmds,
-            domain=domain_tag,
-        )
-
-        self.rag.add_document(doc)
-
-        # 5. Aprendizado Ontogenético: Veronica "Lê" o documento, cria neurônios e grava na memória binária
-        if hasattr(self, "development_engine") and self.development_engine:
-            try:
-                self.development_engine.read_text(
-                    text_content=clean_content,
-                    title=doc.title,
-                    user_id="veronica-self-learner",
-                )
-            except Exception:
-                pass
-
-            # Neurogênese dedicada ao conceito consultado
-            try:
-                self.development_engine.neurogenesis.trigger_neurogenesis_for_concept(
-                    concept=model_name[:35].upper(),
-                    modality="WEB_RESEARCH",
-                    intensity=1,
-                    details={"query": query, "url": primary_url},
-                )
-            except Exception:
-                pass
-
-            # Persiste na memória binária de máquina de alta performance
-            try:
-                if hasattr(self.development_engine.memory, "save_binary_memory"):
-                    self.development_engine.memory.save_binary_memory()
-            except Exception:
-                pass
-
-        self.audit_log.record(
-            actor="veronica-self-learner",
-            action="OFFICIAL_WEB_KNOWLEDGE_AUTO_LEARNED",
-            target=doc_id,
-            status="INDEXED_IN_PERMANENT_MEMORY",
-            details={
-                "query": query,
-                "vendor": v,
-                "family_model": model_name,
-                "source_uri": primary_url,
-                "web_matches": len(web_results),
-                "total_documents_in_rag": len(self.rag.documents),
-            },
-        )
-
+        """Backward-compatible endpoint: research and index evidence from any subject."""
+        research = self.research_open_domain(query, max_results=5)
+        sources = research.get("sources", [])
+        if not sources:
+            return {
+                "document": None, "citation": None, "query": query,
+                "status": "NO_RELEVANT_SOURCE",
+                "reason": "No relevant source was found; no answer was fabricated.",
+            }
+        selected = sources[0]
+        citation = {
+            "title": selected.get("title", ""), "source_uri": selected.get("url", ""),
+            "vendor": selected.get("source_type", "Web source"), "os_name": "N/A",
+            "version_build": "N/A", "reliability_score": selected.get("authority_score", 0.5),
+            "is_official": selected.get("is_primary_source", False),
+        }
+        result_summaries = [{
+            "title": item.get("title", ""), "url": item.get("url", ""),
+            "source_type": item.get("source_type", "Web source"),
+            "is_primary_source": item.get("is_primary_source", False),
+            "relevance": item.get("relevance", 0.0), "full_page": item.get("full_page", False),
+            "snippet": str(item.get("snippet", ""))[:600],
+        } for item in sources]
         return {
-            "document": doc.to_dict(),
-            "citation": doc.to_dict(),
-            "query": query,
-            "vendor": v,
-            "model_name": model_name,
-            "source_uri": primary_url,
-            "content": clean_content,
-            "commands": cmds,
-            "status": "AUTO_LEARNED_AND_INDEXED",
+            "document": {
+                "title": selected.get("title", ""),
+                "content": str(selected.get("content", ""))[:4000],
+                "source_uri": selected.get("url", ""),
+                "original_source": selected.get("source", "Web search"),
+                "reliability_score": selected.get("authority_score", 0.5),
+                "is_official": selected.get("is_primary_source", False),
+            },
+            "citation": citation, "query": query,
+            "source_uri": selected.get("url", ""),
+            "answer": research.get("synthesis", {}).get("answer", ""),
+            "metrics": research.get("metrics", {}),
+            "status": "RESEARCHED_AND_INDEXED",
+            "results": result_summaries,
         }

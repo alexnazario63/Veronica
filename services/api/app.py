@@ -12,11 +12,14 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import Body, FastAPI, Header, HTTPException
+from fastapi import Body, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import HTMLResponse, StreamingResponse
+from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
+from core.contracts import NetCanvasArtifact, MessageDelta
+from services.api.streaming import json_bytes, sse_frame
+from services.api.workspace import ArtifactStore
 
 from core.training import TrainingHyperparameters
 from services.api.services_hub import VeronicaPlatformHub
@@ -37,6 +40,7 @@ class SendMessageRequest(BaseModel):
     modality: str = Field(default="TEXT")
     target_devices: Optional[List[str]] = None
     mode: Optional[str] = Field(default="chat")
+    image_data: Optional[str] = Field(default=None)
 
 
 class ConversationFeedbackRequest(BaseModel):
@@ -49,7 +53,7 @@ class ConversationFeedbackRequest(BaseModel):
     os_name: str = Field(default="Unspecified")
     os_version: str = Field(default="Unspecified")
     evidence_reference: str = Field(default="Feedback técnico via Chat GUI")
-    auto_approve_memory: bool = Field(default=True)
+    auto_approve_memory: bool = Field(default=False)
 
 
 class ApproveCorrectionRequest(BaseModel):
@@ -59,11 +63,13 @@ class ApproveCorrectionRequest(BaseModel):
 
 class VoiceTranscribeRequest(BaseModel):
     conversation_id: str
-    raw_transcript: str
+    raw_transcript: str = ""
     duration_sec: float = 4.0
     audio_size_bytes: int = 32000
     rms_energy_db: float = -20.0
     auto_send_to_chat: bool = True
+    audio_data_base64: Optional[str] = None
+    audio_format: str = "wav"
 
 
 class VoiceConsentRequest(BaseModel):
@@ -137,6 +143,8 @@ class CreateChangePlanRequest(BaseModel):
 class ApproveChangeRequest(BaseModel):
     confirmed_plan_hash: str
     confirmed_maintenance_window: str
+    signature_ed25519: str
+    approval_timestamp: str
     approval_channel: str = "EXPLICIT_WEB_APPROVAL"
 
 
@@ -160,10 +168,29 @@ class AutonomousIntervalRequest(BaseModel):
     workers: Optional[int] = Field(default=None, ge=1, le=64)
 
 
+class AdminRuntimeConfigRequest(BaseModel):
+    workers: Optional[int] = Field(default=None, ge=1, le=64)
+    interval_seconds: Optional[float] = Field(default=None, ge=0.002, le=3600.0)
+
+
+class WorkspaceArtifactRequest(BaseModel):
+    artifact: NetCanvasArtifact
+
+
+class WorkspaceEditRequest(BaseModel):
+    start_line: int = Field(ge=1)
+    end_line: int = Field(ge=1)
+    replacement: str
+
+
 def create_app(data_dir: Optional[Path] = None) -> FastAPI:
 
     base_dir = Path(data_dir) if data_dir else Path(__file__).resolve().parents[2] / "runtime_data"
     hub = VeronicaPlatformHub(base_dir)
+
+    class _FastJSONResponse(JSONResponse):
+        def render(self, content: Any) -> bytes:
+            return json_bytes(content)
 
     app = FastAPI(
         title="VERONICA — Inteligência Artificial Nativa para Engenharia de Redes",
@@ -173,8 +200,15 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
             "RAG documental rastreável, diagnóstico em 11 etapas, configuração segura em 10 etapas "
             "e Neural Observatory."
         ),
+        default_response_class=_FastJSONResponse,
     )
     app.state.hub = hub
+    app.state.artifact_store = ArtifactStore(base_dir / "netcanvas_artifacts.sqlite3")
+    app.state.agent_orchestrators = {}
+
+    @app.on_event("startup")
+    async def initialize_api_stores() -> None:
+        await app.state.artifact_store.initialize()
 
     app.add_middleware(
         CORSMiddleware,
@@ -189,6 +223,7 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
             return fn_call()
         except PermissionError as exc:
             raise HTTPException(status_code=403, detail=str(exc)) from exc
+
         except (KeyError, FileNotFoundError) as exc:
             raise HTTPException(status_code=404, detail=str(exc)) from exc
         except ValueError as exc:
@@ -243,6 +278,25 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
             lambda: hub.conversation_service.get_conversation(conversation_id, x_user_id)
         )
 
+    @app.delete("/api/conversations/{conversation_id}")
+    def delete_conversation_endpoint(
+        conversation_id: str,
+        x_user_id: str = Header(default="usr-eng-01"),
+    ) -> Dict[str, Any]:
+        """Exclui permanentemente uma conversa e seu histórico (estilo Claude/ChatGPT)."""
+        def _delete() -> Dict[str, Any]:
+            result = hub.conversation_service.delete_conversation(conversation_id, x_user_id)
+            memory = hub.development_engine.memory
+            forgotten = memory.forget_conversation(conversation_id, x_user_id)
+            memory.working_memory = [
+                item for item in memory.working_memory
+                if not (item.metadata.get("user_id") == x_user_id and item.metadata.get("conversation_id") == conversation_id)
+            ]
+            memory.auto_save_binary()
+            result["episodic_memories_forgotten"] = forgotten
+            return result
+        return _handle_domain_errors(_delete)
+
     @app.post("/api/conversations/{conversation_id}/messages")
     def send_message(
         conversation_id: str,
@@ -257,6 +311,7 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                 modality=req.modality,
                 target_devices=req.target_devices,
                 mode=req.mode or "chat",
+                image_data=req.image_data,
             )
         )
 
@@ -273,6 +328,7 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
     async def stream_conversation_message(
         conversation_id: str,
         req: SendMessageRequest,
+        request: Request,
         x_user_id: str = Header(default="usr-eng-01"),
     ) -> StreamingResponse:
         _handle_domain_errors(
@@ -280,18 +336,139 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         )
 
         async def _token_stream():
-            for event in hub.chat_service.stream_message(
-                conversation_id=conversation_id,
-                user_id=x_user_id,
-                message_text=req.content,
-                modality=req.modality,
-                target_devices=req.target_devices,
-                mode=req.mode or "chat",
-            ):
-                yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
-                await asyncio.sleep(0.005)
+            try:
+                for event in hub.chat_service.stream_message(
+                    conversation_id=conversation_id,
+                    user_id=x_user_id,
+                    message_text=req.content,
+                    modality=req.modality,
+                    target_devices=req.target_devices,
+                    mode=req.mode or "chat",
+                ):
+                    if await request.is_disconnected():
+                        hub.chat_service.cancel_generation(conversation_id)
+                        break
+                    yield sse_frame(event, event.get("type"))
+                    await asyncio.sleep(0.005)
+            finally:
+                if await request.is_disconnected():
+                    hub.chat_service.cancel_generation(conversation_id)
 
         return StreamingResponse(_token_stream(), media_type="text/event-stream")
+
+    @app.post("/api/conversations/{conversation_id}/agent-stream")
+    async def stream_agent_events(
+        conversation_id: str,
+        req: SendMessageRequest,
+        request: Request,
+        x_user_id: str = Header(default="usr-eng-01"),
+    ) -> StreamingResponse:
+        _handle_domain_errors(lambda: hub.conversation_service.get_conversation(conversation_id, x_user_id))
+
+        async def _events():
+            # When an orchestrator is attached, pass its typed ReAct events directly
+            # through SSE. Existing ChatService generation remains the compatibility
+            # fallback and is adapted to the same discriminated event envelope.
+            try:
+                orchestrator = getattr(hub, "agent_orchestrator", None)
+                if orchestrator is None and hasattr(hub, "build_agent_orchestrator"):
+                    orchestrator = app.state.agent_orchestrators.get(x_user_id)
+                    if orchestrator is None:
+                        orchestrator = hub.build_agent_orchestrator(x_user_id)
+                        app.state.agent_orchestrators[x_user_id] = orchestrator
+                if orchestrator is not None:
+                    hub.conversation_service.append_message(
+                        conversation_id=conversation_id, user_id=x_user_id,
+                        role="user", content=req.content, modality=req.modality,
+                    )
+                    answer_chunks = []
+                    async for typed_event in orchestrator.run(
+                        req.content, session_id=conversation_id,
+                        context={"user_id": x_user_id, "modality": req.modality,
+                                 "target_devices": req.target_devices},
+                    ):
+                        if await request.is_disconnected():
+                            hub.chat_service.cancel_generation(conversation_id)
+                            break
+                        payload = typed_event.model_dump(mode="json")
+                        if payload.get("type") == "message_delta":
+                            answer_chunks.append(str(payload.get("delta", "")))
+                        if payload.get("type") == "artifact_open":
+                            artifact = payload.get("artifact", {})
+                            await app.state.artifact_store.save(
+                                x_user_id, artifact,
+                                __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat(),
+                            )
+                        yield sse_frame(payload, payload.get("type"))
+                    if answer_chunks:
+                        hub.conversation_service.append_message(
+                            conversation_id=conversation_id, user_id=x_user_id,
+                            role="assistant", content="".join(answer_chunks),
+                            modality="TEXT", structured_payload={"agent_stream": True},
+                        )
+                    return
+                for item in hub.chat_service.stream_message(
+                    conversation_id=conversation_id, user_id=x_user_id,
+                    message_text=req.content, modality=req.modality,
+                    target_devices=req.target_devices, mode=req.mode or "agent",
+                ):
+                    if await request.is_disconnected():
+                        hub.chat_service.cancel_generation(conversation_id)
+                        break
+                    event = MessageDelta(delta=item.get("token_text", "")) if item.get("type") == "token" else item
+                    if hasattr(event, "model_dump"):
+                        payload = event.model_dump(mode="json")
+                    elif isinstance(event, dict) and event.get("type") == "complete":
+                        payload = {"type": "message_delta", "delta": event.get("content", ""),
+                                   "message_id": event.get("message_id"), "done": True,
+                                   "structured_payload": event.get("structured_payload")}
+                    else:
+                        payload = event
+                    yield sse_frame(payload, payload.get("type") if isinstance(payload, dict) else None)
+                    await asyncio.sleep(0)
+            finally:
+                if await request.is_disconnected():
+                    hub.chat_service.cancel_generation(conversation_id)
+
+        return StreamingResponse(_events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+    @app.get("/api/workspace/artifacts")
+    async def list_workspace_artifacts(x_user_id: str = Header(default="usr-eng-01")) -> Dict[str, Any]:
+        return {"artifacts": await app.state.artifact_store.list(x_user_id)}
+
+    @app.put("/api/workspace/artifacts")
+    async def save_workspace_artifact(req: WorkspaceArtifactRequest,
+                                     x_user_id: str = Header(default="usr-eng-01")) -> Dict[str, Any]:
+        artifact = req.artifact.model_dump(mode="json")
+        created = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        await app.state.artifact_store.save(x_user_id, artifact, created)
+        return {"artifact": artifact, "created_at": created}
+
+    @app.get("/api/workspace/artifacts/{artifact_id}/versions")
+    async def get_workspace_artifact_versions(artifact_id: str,
+                                              x_user_id: str = Header(default="usr-eng-01")) -> Dict[str, Any]:
+        return {"artifact_id": artifact_id, "versions": await app.state.artifact_store.versions(x_user_id, artifact_id)}
+
+    @app.patch("/api/workspace/artifacts/{artifact_id}/versions/{version}/proposed-content")
+    async def edit_workspace_artifact(artifact_id: str, version: int, req: WorkspaceEditRequest,
+                                      x_user_id: str = Header(default="usr-eng-01")) -> Dict[str, Any]:
+        versions = await app.state.artifact_store.versions(x_user_id, artifact_id)
+        current = next((row["artifact"] for row in versions if row["artifact"]["version"] == version), None)
+        if current is None:
+            raise HTTPException(status_code=404, detail="Artifact version not found.")
+        lines = (current.get("proposed_content") or "").splitlines()
+        if req.start_line > len(lines) + 1 or req.end_line < req.start_line or req.end_line > max(len(lines), req.start_line):
+            raise HTTPException(status_code=400, detail="Selected line range is outside the artifact content.")
+        lines[req.start_line - 1:req.end_line] = req.replacement.splitlines()
+        current["proposed_content"] = "\n".join(lines)
+        current["version"] = version + 1
+        hash_payload = {key: value for key, value in current.items() if key != "sha256_hash"}
+        current["sha256_hash"] = __import__("hashlib").sha256(
+            json.dumps(hash_payload, sort_keys=True, ensure_ascii=False, default=str).encode("utf-8")
+        ).hexdigest()
+        created = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+        await app.state.artifact_store.save(x_user_id, current, created)
+        return {"artifact": current, "created_at": created, "recalculation": "queued_for_assisted_recalculation"}
 
     @app.post("/api/conversations/{conversation_id}/feedback")
     def submit_conversation_feedback(
@@ -312,15 +489,13 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                 domain=req.domain,
                 evidence_reference=f"{req.evidence_reference} (conv={conversation_id}, msg={req.message_id})",
             )
-            # Indexa diretamente no RAG para aprendizado factual imediato
-            if req.auto_approve_memory and hasattr(hub, "index_correction_into_rag"):
-                hub.index_correction_into_rag(record)
-
+            # Correcoes entram como memoria factual global somente apos aprovacao humana.
             return {
                 **record,
                 "conversation_id": conversation_id,
                 "message_id": req.message_id,
-                "indexed_in_rag_memory": req.auto_approve_memory,
+                "indexed_in_rag_memory": False,
+                "requires_human_approval": record.get("status") == "PENDING_VERIFICATION",
             }
 
         return _handle_domain_errors(_exec)
@@ -343,15 +518,19 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         x_user_id: str = Header(default="usr-app-01"),
     ) -> Dict[str, Any]:
         ds_ver = req.dataset_version if req else "v1.1.0-curated"
-        notes = req.reviewer_notes if req else "Correção técnica validada contra documentação oficial."
-        return _handle_domain_errors(
-            lambda: hub.continuous_learning.verify_and_approve_correction(
+        notes = req.reviewer_notes if req else "Human-reviewed evidence accepted."
+
+        def _approve() -> Dict[str, Any]:
+            record = hub.continuous_learning.verify_and_approve_correction(
                 correction_id=correction_id,
                 reviewer_id=x_user_id,
                 dataset_version=ds_ver,
                 reviewer_notes=notes,
             )
-        )
+            hub.index_correction_into_rag(record)
+            return {**record, "indexed_in_rag_memory": True}
+
+        return _handle_domain_errors(_approve)
 
     @app.get("/api/learning/status")
     def get_learning_status() -> Dict[str, Any]:
@@ -400,6 +579,8 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                 audio_size_bytes=req.audio_size_bytes,
                 consent_granted=bool(conv.get("audio_consent", False)),
                 rms_energy_db=req.rms_energy_db,
+                audio_data_base64=req.audio_data_base64,
+                audio_format=req.audio_format,
             )
             chat_reply = None
             tts_reply = None
@@ -554,6 +735,28 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
     @app.get("/api/neural/telemetry")
     def get_hardware_telemetry_endpoint() -> Dict[str, Any]:
         return hub.metrics_service.get_hardware_telemetry()
+
+    @app.websocket("/api/neural/telemetry/ws")
+    async def neural_telemetry_websocket(websocket: WebSocket) -> None:
+        await websocket.accept()
+        interval = 1.0
+        try:
+            while True:
+                metrics = hub.metrics_service.get_live_metrics()
+                metrics["hardware"] = hub.metrics_service.get_hardware_telemetry()
+                await websocket.send_bytes(json_bytes(metrics))
+                try:
+                    # A short receive timeout lets clients request a sampling period
+                    # without making disconnect detection wait for the next sample.
+                    message = await asyncio.wait_for(websocket.receive_json(), timeout=interval)
+                    if isinstance(message, dict) and "interval_seconds" in message:
+                        interval = max(0.1, min(30.0, float(message["interval_seconds"])))
+                except asyncio.TimeoutError:
+                    pass
+        except WebSocketDisconnect:
+            return
+        except (ValueError, RuntimeError):
+            return
 
     @app.get("/api/experiments")
     def list_experiments() -> Dict[str, Any]:
@@ -733,6 +936,9 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         req: ApproveChangeRequest,
         x_user_id: str = Header(default="usr-app-01"),
     ) -> Dict[str, Any]:
+        if req.approval_channel.upper() != "EXPLICIT_WEB_APPROVAL":
+            code = "VOICE_APPROVAL_PROHIBITED" if req.approval_channel.upper() == "VOICE" else "HUMAN_WEB_APPROVAL_REQUIRED"
+            raise HTTPException(status_code=403, detail=f"{code}: Stage 6 requires explicit human web approval.")
         return _handle_domain_errors(
             lambda: hub.change_controller.approve_change_stage_6(
                 change_id=change_id,
@@ -740,6 +946,8 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                 confirmed_plan_hash=req.confirmed_plan_hash,
                 confirmed_maintenance_window=req.confirmed_maintenance_window,
                 approval_channel=req.approval_channel,
+                signature_ed25519=req.signature_ed25519,
+                approval_timestamp=req.approval_timestamp,
             )
         )
 
@@ -867,6 +1075,78 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
             )
         return _handle_domain_errors(_set)
 
+    @app.get("/api/admin/overview")
+    def get_admin_overview() -> Dict[str, Any]:
+        memory = hub.development_engine.memory
+        development = hub.development_engine.get_full_development_status()
+        development.pop("working_memory", None)
+        development.pop("introspective_narrative", None)
+        memory_map = memory.export_full_memory_map()
+        memory_summary = {
+            "total_semantic_concepts": memory_map["total_semantic_concepts"],
+            "total_episodic_memories": memory_map["total_episodic_memories"],
+            "total_consolidation_cycles": memory_map["total_consolidation_cycles"],
+            "semantic_nodes": memory_map["semantic_nodes"],
+        }
+        return {
+            "model": hub.config.to_dict(),
+            "development": development,
+            "autonomous_learning": hub.autonomous_learning.get_status(),
+            "binary_memory": memory.get_binary_stats(),
+            "memory": memory_summary,
+            "runtime": {"array_backend": "numpy", "device_writes_enabled": False},
+        }
+
+    @app.get("/api/admin/research-quality")
+    def get_research_quality() -> Dict[str, Any]:
+        return hub.get_open_domain_quality()
+
+    @app.get("/api/admin/memory-graph")
+    def get_admin_memory_graph(limit: int = 400) -> Dict[str, Any]:
+        circuit = hub.development_engine.neurogenesis.circuit
+        neurons = circuit.neurons[-max(1, min(limit, 1000)):]
+        nodes = [neuron.export_meta() for neuron in neurons]
+        edges: List[Dict[str, Any]] = []
+        for index, left in enumerate(neurons):
+            left_concepts = set(left.co_activated_concepts)
+            if not left_concepts:
+                continue
+            for right in neurons[index + 1:]:
+                shared = left_concepts.intersection(right.co_activated_concepts)
+                if shared:
+                    edges.append({
+                        "source": left.neuron_id,
+                        "target": right.neuron_id,
+                        "strength": round(min(left.synaptic_strength, right.synaptic_strength), 3),
+                        "label": next(iter(shared)),
+                    })
+                    if len(edges) >= 1600:
+                        break
+            if len(edges) >= 1600:
+                break
+        return {"nodes": nodes, "edges": edges, "total_neurons": len(circuit.neurons)}
+
+    @app.get("/api/admin/config")
+    def get_admin_runtime_config() -> Dict[str, Any]:
+        return {
+            "model": hub.config.to_dict(),
+            "autonomous_learning": hub.autonomous_learning.get_status(),
+            "runtime": {"array_backend": "numpy", "device_writes_enabled": False},
+        }
+
+    @app.put("/api/admin/config")
+    def update_admin_runtime_config(req: AdminRuntimeConfigRequest) -> Dict[str, Any]:
+        if req.workers is None and req.interval_seconds is None:
+            raise HTTPException(status_code=400, detail="Informe workers ou interval_seconds.")
+        return hub.autonomous_learning.set_config(
+            workers=req.workers,
+            interval_seconds=req.interval_seconds,
+        )
+
+    @app.post("/api/admin/memory/consolidate")
+    def consolidate_admin_memory() -> Dict[str, Any]:
+        return hub.development_engine.sleep_and_consolidate(user_id="admin")
+
     # ==================== 8. Servir Interface Gráfica Web (GUI / Vite) ====================
 
     frontend_dir = Path(__file__).resolve().parents[2] / "frontend"
@@ -888,6 +1168,10 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         if index_file.exists():
             return HTMLResponse(index_file.read_text(encoding="utf-8"))
         return HTMLResponse("<h1>Veronica Platform API is running.</h1>")
+
+    @app.get("/admin", response_class=HTMLResponse)
+    def serve_veronica_admin() -> HTMLResponse:
+        return serve_veronica_gui()
 
     return app
 

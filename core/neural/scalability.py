@@ -11,7 +11,7 @@ Escalabilidade e Eficiência Computacional do Motor Matemático da Veronica (Se�
 from __future__ import annotations
 
 from contextlib import contextmanager
-from typing import Any, Callable, Dict, Iterable, Iterator, List, Optional, Sequence, Set, Tuple
+from typing import Any, Callable, Dict, Iterable, Iterator, Optional, Sequence, Set
 import numpy as np
 
 from core.neural.tensor import Tensor

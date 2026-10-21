@@ -18,6 +18,9 @@ from knowledge.ingestion import (
     chunk_large_document,
     OfficialDocumentationSearchConnector,
     KnowledgeIngestor,
+    SanitizedUntrustedText,
+    sanitize_untrusted_text,
+    sanitize_device_output,
 )
 from knowledge.retrieval import HybridRAGEngine
 
@@ -37,6 +40,9 @@ __all__ = [
     "chunk_large_document",
     "OfficialDocumentationSearchConnector",
     "KnowledgeIngestor",
+    "SanitizedUntrustedText",
+    "sanitize_untrusted_text",
+    "sanitize_device_output",
     "HybridRAGEngine",
 ]
 

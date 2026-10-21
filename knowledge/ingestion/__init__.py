@@ -13,6 +13,7 @@ from knowledge.ingestion.ingestor import (
     search_live_web_and_rfc,
     KnowledgeIngestor,
 )
+from knowledge.ingestion.sanitizer import SanitizedUntrustedText, sanitize_untrusted_text, sanitize_device_output
 
 __all__ = [
     "scrub_secrets",
@@ -26,5 +27,8 @@ __all__ = [
     "OfficialDocumentationSearchConnector",
     "search_live_web_and_rfc",
     "KnowledgeIngestor",
+    "SanitizedUntrustedText",
+    "sanitize_untrusted_text",
+    "sanitize_device_output",
 ]
 

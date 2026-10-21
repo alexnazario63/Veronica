@@ -8,7 +8,7 @@ ou versão não possuir mecanismos de segurança validados.
 from __future__ import annotations
 
 from abc import ABC, abstractmethod
-from dataclasses import asdict, dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 import difflib
 import hashlib
@@ -495,8 +495,8 @@ class DigitalTwinNetworkAdapter(BaseVendorAdapter):
                 lineterm="",
             )
         )
-        added = sum(1 for l in diff_lines if l.startswith("+") and not l.startswith("+++"))
-        removed = sum(1 for l in diff_lines if l.startswith("-") and not l.startswith("---"))
+        added = sum(1 for line in diff_lines if line.startswith("+") and not line.startswith("+++"))
+        removed = sum(1 for line in diff_lines if line.startswith("-") and not line.startswith("---"))
         return {
             "has_changes": len(diff_lines) > 0,
             "lines_added": added,

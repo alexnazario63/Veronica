@@ -11,7 +11,6 @@ Valida:
 
 from __future__ import annotations
 
-import base64
 from pathlib import Path
 import tempfile
 import pytest
@@ -25,7 +24,6 @@ from core.development import (
     BinaryMachineMemoryStore,
     DynamicNeuron,
     NeurogenesisCircuit,
-    NeurogenesisEngine,
     MemorySystem,
     VisualPerceptionCortex,
     ReadingComprehensionCortex,

@@ -6,7 +6,7 @@ da arquitetura VeronicaTransformer.
 from __future__ import annotations
 
 import math
-from typing import Optional, Tuple
+from typing import Optional
 import numpy as np
 
 from core.neural.tensor import Tensor

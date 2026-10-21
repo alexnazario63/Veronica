@@ -907,59 +907,37 @@ class OfficialDocumentationSearchConnector:
         }
 
 
-def _build_technical_search_queries(raw_query: str) -> List[str]:
-    """
-    Analisa a pergunta do operador e formula queries técnicas de alta precisão
-    (incluindo equivalentes canônicos em inglês/IETF RFC quando aplicável).
-    """
+def _build_open_domain_search_queries(raw_query: str) -> List[str]:
+    """Prepare a neutral search plus a source-focused query when the topic is recognizable."""
     import unicodedata
 
     q_clean = re.sub(r"[?!.,;:]", " ", raw_query).strip()
-    q_norm = "".join(
-        c for c in unicodedata.normalize("NFD", q_clean.lower())
-        if unicodedata.category(c) != "Mn"
-    )
-    # Remove prefixos conversacionais para focar nos termos técnicos
+    q_norm = "".join(c for c in unicodedata.normalize("NFD", q_clean.lower()) if unicodedata.category(c) != "Mn")
     q_stripped = re.sub(
-        r"^(qual\s+(é|e)\s+(a|o)\s+|qual\s+(a|o)\s+|qual\s+|quais\s+(sao|são)\s+(as|os)\s+|quais\s+|"
-        r"o\s+que\s+sabe\s+sobre\s+(o|a)?\s*|o\s+que\s+(é|e)\s+(um|uma|o|a)?\s*|"
-        r"como\s+funciona\s+(o|a)?\s*|explique\s+(sobre)?\s*|me\s+fale\s+sobre\s*)",
-        "",
-        q_norm,
+        r"^(qual\s+(?:e\s+)?(?:a|o)\s+|qual\s+|quais\s+(?:sao\s+)?(?:as|os)\s+|quais\s+|o\s+que\s+(?:e\s+)?(?:um|uma|o|a)?\s*|como\s+funciona\s+(?:o|a)?\s*|explique\s+(?:sobre)?\s*|me\s+fale\s+sobre\s*)",
+        "", q_norm,
     ).strip()
-
-    pt_to_en_map = [
-        (r"\bmetrica\s+maxima\b", "maximum metric cost 16-bit RFC 6987 RFC 2328"),
-        (r"\bcusto\s+maximo\b", "maximum interface cost metric 65535 RFC 2328"),
-        (r"\bmetrica\b", "metric cost"),
-        (r"\bmaxima\b|\bmaximo\b", "maximum max-metric"),
-        (r"\bminima\b|\bminimo\b", "minimum"),
-        (r"\bcusto\b", "cost"),
-        (r"\bdistancia\s+administrativa\b", "administrative distance preference"),
-        (r"\btemporizador(es)?\b|\btimer(s)?\b", "timers hello dead interval RFC"),
-        (r"\blargura\s+de\s+banda\b", "reference bandwidth cost calculation"),
-        (r"\badjacencia\b|\bvizinhanca\b", "neighbor adjacency state machine"),
-        (r"\bcabecalho\b", "packet header format RFC"),
+    topic = q_stripped or q_clean
+    queries = [topic]
+    words = set(re.findall(r"[\w-]{3,}", topic))
+    domain_sites = [
+        ({"bgp", "ospf", "mpls", "rfc", "ietf", "router", "roteador", "network", "rede"}, "site:rfc-editor.org OR site:ietf.org OR site:cisco.com"),
+        ({"physics", "fisica", "quantum", "quantica", "gravity", "gravitacao", "particula", "particle", "relativity", "relatividade"}, "site:nasa.gov OR site:cern.ch OR site:arxiv.org OR site:aps.org"),
+        ({"medical", "medicina", "health", "saude", "disease", "doenca", "treatment", "tratamento", "drug", "medicamento"}, "site:who.int OR site:nih.gov OR site:pubmed.ncbi.nlm.nih.gov OR site:gov.br"),
+        ({"law", "legal", "lei", "direito", "regulation", "regulamento", "regulacao"}, "site:gov.br OR site:planalto.gov.br OR site:eur-lex.europa.eu"),
+        ({"chemistry", "quimica", "molecule", "molecula", "reaction", "reacao", "element", "elemento"}, "site:acs.org OR site:rsc.org OR site:pubchem.ncbi.nlm.nih.gov OR site:nist.gov"),
+        ({"math", "mathematics", "matematica", "algebra", "calculus", "calculo", "theorem", "teorema"}, "site:ams.org OR site:arxiv.org OR site:maa.org"),
+        ({"astronomy", "astronomia", "planet", "planeta", "galaxy", "galaxia", "star", "estrela", "cosmology"}, "site:nasa.gov OR site:esa.int OR site:iau.org OR site:arxiv.org"),
+        ({"history", "historia", "historical", "historico", "war", "guerra", "empire", "imperio"}, "site:loc.gov OR site:archives.gov OR site:nationalarchives.gov.uk"),
+        ({"software", "programming", "programacao", "python", "javascript", "api", "database", "linux", "algorithm", "algoritmo"}, "site:python.org OR site:developer.mozilla.org OR site:kernel.org OR site:learn.microsoft.com"),
     ]
-
-    en_q = q_stripped
-    translated = False
-    for pattern, repl in pt_to_en_map:
-        if re.search(pattern, en_q):
-            en_q = re.sub(pattern, repl, en_q)
-            translated = True
-    # Remove preposições residuais
-    en_q = re.sub(r"\b(do|da|de|dos|das|no|na|nos|nas|em|para|por|com)\b", " ", en_q)
-    en_q = re.sub(r"\s+", " ", en_q).strip()
-
-    queries: List[str] = []
-    if translated and en_q:
-        queries.append(en_q)
-    if q_stripped and q_stripped not in queries:
-        queries.append(q_stripped)
-    if q_clean and q_clean not in queries:
+    for markers, sites in domain_sites:
+        if words & markers:
+            queries.append(f"{topic} ({sites})")
+            break
+    if q_clean and q_clean.casefold() not in {item.casefold() for item in queries}:
         queries.append(q_clean)
-    return queries[:2]
+    return list(dict.fromkeys(queries))[:3]
 
 
 def search_live_web_and_rfc(
@@ -984,12 +962,14 @@ def search_live_web_and_rfc(
     if not clean_q:
         return results
 
-    search_queries = _build_technical_search_queries(clean_q)
+    search_queries = _build_open_domain_search_queries(clean_q)
 
     # 1. DuckDuckGo HTML Lite com queries analíticas
+    per_query_limit = max(2, max_results // max(1, len(search_queries)))
     for sq in search_queries:
         if len(results) >= max_results:
             break
+        query_added = 0
         try:
             ddg_url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(sq)
             req = urllib.request.Request(
@@ -1045,42 +1025,17 @@ def search_live_web_and_rfc(
                                 "source": "Web Search (DuckDuckGo)",
                             }
                         )
-                        if len(results) >= max_results:
+                        query_added += 1
+                        if len(results) >= max_results or query_added >= per_query_limit:
                             break
         except Exception:
             pass
 
-    # 2. Enriquecimento direto de IETF RFC se algum resultado apontar para uma RFC
-    for item in list(results[:2]):
-        rfc_match = re.search(r"rfc[-/]?(\d{3,5})", item.get("url", "").lower() + " " + item.get("title", "").lower())
-        if rfc_match:
-            rfc_num = rfc_match.group(1)
-            try:
-                rfc_txt_url = f"https://www.rfc-editor.org/rfc/rfc{rfc_num}.txt"
-                req_rfc = urllib.request.Request(
-                    rfc_txt_url,
-                    headers={"User-Agent": "VeronicaNetworkAI/2.0 (IETF RFC Analyzer)"},
-                )
-                with urllib.request.urlopen(req_rfc, timeout=2.5) as resp:
-                    rfc_text = resp.read().decode("utf-8", errors="ignore")
-                    # Busca definição de métrica / constante arquitetural dentro da RFC
-                    sec_match = re.search(
-                        r"(MaxLinkMetric\s+The metric value.*?0xffff\.|LSInfinity\s+The metric value.*?0xffffff\.)",
-                        rfc_text,
-                        re.DOTALL | re.IGNORECASE,
-                    )
-                    if sec_match:
-                        excerpt = re.sub(r"\s+", " ", sec_match.group(1)).strip()
-                        item["snippet"] = f"{item['snippet']} [Trecho Oficial RFC {rfc_num}: {excerpt}]"
-            except Exception:
-                pass
-            break
-
-    # 3. Wikipedia API (pt-BR e en como complemento enciclopédico de alta precisão)
+    # 2. Wikipedia API (pt-BR e en como complemento enciclopédico de alta precisão)
     if len(results) < max_results:
         for lang in ["pt", "en"]:
             try:
-                wiki_q = search_queries[-1] if search_queries else clean_q
+                wiki_q = clean_q
                 wiki_url = f"https://{lang}.wikipedia.org/w/api.php?action=query&list=search&srsearch={urllib.parse.quote(wiki_q)}&format=json"
                 req_wiki = urllib.request.Request(
                     wiki_url,
@@ -1113,6 +1068,98 @@ def search_live_web_and_rfc(
     return results
 
 
+def fetch_web_page_content(url: str, timeout: float = 3.0, max_bytes: int = 2_000_000) -> Dict[str, str]:
+    """Fetch a public HTTP(S) page and extract readable text, rejecting private hosts."""
+    import ipaddress
+    import socket
+    import urllib.error
+    import urllib.request
+    from urllib.parse import urljoin, urlparse
+
+    class NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    current_url = url.strip()
+    headers = {"User-Agent": "VeronicaResearch/1.0 (+open-domain evidence retrieval)", "Accept": "text/html,application/xhtml+xml,text/plain,application/pdf,application/json;q=0.8,*/*;q=0.3"}
+    opener = urllib.request.build_opener(NoRedirect)
+    raw = b""
+    content_type = ""
+    for _ in range(4):
+        parsed = urlparse(current_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname or parsed.username or parsed.password:
+            return {"content": "", "title": "", "url": current_url, "error": "UNSAFE_URL"}
+        host = parsed.hostname.lower().rstrip(".")
+        if host in {"localhost", "localhost.localdomain"} or host.endswith((".local", ".internal")):
+            return {"content": "", "title": "", "url": current_url, "error": "NON_PUBLIC_HOST"}
+        try:
+            try:
+                address = ipaddress.ip_address(host)
+                addresses = [address]
+            except ValueError:
+                addresses = [ipaddress.ip_address(item[4][0]) for item in socket.getaddrinfo(host, parsed.port or (443 if parsed.scheme == "https" else 80), type=socket.SOCK_STREAM)]
+            if not addresses or any(not address.is_global for address in addresses):
+                return {"content": "", "title": "", "url": current_url, "error": "NON_PUBLIC_HOST"}
+        except (OSError, ValueError):
+            return {"content": "", "title": "", "url": current_url, "error": "HOST_RESOLUTION_FAILED"}
+
+        request = urllib.request.Request(current_url, headers=headers)
+        try:
+            with opener.open(request, timeout=max(0.5, min(timeout, 5.0))) as response:
+                final_url = response.geturl()
+                if final_url != current_url:
+                    current_url = final_url
+                    continue
+                raw = response.read(max_bytes + 1)
+                content_type = response.headers.get("Content-Type", "").split(";", 1)[0].lower()
+                break
+        except urllib.error.HTTPError as exc:
+            if exc.code in {301, 302, 303, 307, 308} and exc.headers.get("Location"):
+                current_url = urljoin(current_url, exc.headers["Location"])
+                continue
+            return {"content": "", "title": "", "url": current_url, "error": f"HTTP_{exc.code}"}
+        except (OSError, TimeoutError, ValueError):
+            return {"content": "", "title": "", "url": current_url, "error": "FETCH_FAILED"}
+    else:
+        return {"content": "", "title": "", "url": current_url, "error": "REDIRECT_LIMIT"}
+
+    if len(raw) > max_bytes:
+        raw = raw[:max_bytes]
+    if content_type == "application/pdf" or current_url.lower().split("?", 1)[0].endswith(".pdf"):
+        try:
+            import fitz
+            pdf = fitz.open(stream=raw, filetype="pdf")
+            content = "\n".join(page.get_text("text") for page in pdf[:8])
+            return {"content": content[:30000], "title": "", "url": current_url, "content_type": "application/pdf"}
+        except Exception:
+            return {"content": "", "title": "", "url": current_url, "error": "PDF_EXTRACTION_FAILED"}
+
+    text = raw.decode("utf-8", errors="replace")
+    title = ""
+    if "html" in content_type or "<html" in text[:1000].lower() or "<!doctype html" in text[:1000].lower():
+        try:
+            from selectolax.lexbor import LexborHTMLParser
+            tree = LexborHTMLParser(text)
+            title_node = tree.css_first("title")
+            title = title_node.text(strip=True) if title_node else ""
+            for node in tree.css("script,style,noscript,svg,nav,footer,header,form,aside"):
+                node.decompose()
+            main = tree.css_first("article") or tree.css_first("main") or tree.css_first("[role=main]") or tree.body or tree.root
+            text = main.text(separator=" ", strip=True)
+        except Exception:
+            title_match = re.search(r"<title[^>]*>(.*?)</title>", text, re.I | re.S)
+            title = html.unescape(re.sub(r"<[^>]+>", " ", title_match.group(1))).strip() if title_match else ""
+            text = html.unescape(re.sub(r"<(script|style|nav|footer|header)[^>]*>.*?</\1>", " ", text, flags=re.I | re.S))
+            text = re.sub(r"<[^>]+>", " ", text)
+    elif "json" in content_type:
+        try:
+            text = json.dumps(json.loads(text), ensure_ascii=False)
+        except json.JSONDecodeError:
+            pass
+    text = re.sub(r"\s+", " ", text).strip()
+    return {"content": text[:30000], "title": title[:500], "url": current_url, "content_type": content_type}
+
+
 class KnowledgeIngestor:
     """
     Processa e valida novos documentos técnicos sem alterar os pesos neurais do modelo.
@@ -1141,8 +1188,13 @@ class KnowledgeIngestor:
         overlap_chars: int = 150,
     ) -> Dict[str, Any]:
         normalized = normalize_format_content(raw_content, file_format)
-        scrubbed_text, secrets_redacted = scrub_secrets(normalized)
-        injected, injection_reasons = detect_prompt_injection(scrubbed_text)
+        from knowledge.ingestion.sanitizer import sanitize_untrusted_text
+
+        sanitized = sanitize_untrusted_text(normalized, source="ingested_document")
+        scrubbed_text = sanitized.text
+        secrets_redacted = sanitized.secrets_redacted
+        injected = sanitized.injection_detected
+        injection_reasons = list(sanitized.reasons)
         commands, tables = extract_tables_and_commands(scrubbed_text)
         chunks = chunk_large_document(
             scrubbed_text,

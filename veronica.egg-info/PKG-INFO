@@ -1,0 +1,50 @@
+Metadata-Version: 2.4
+Name: veronica
+Version: 1.0.0
+Summary: Veronica — Inteligência Artificial Nativa para Engenharia de Redes
+Requires-Python: >=3.11
+Requires-Dist: numpy>=2.0
+Requires-Dist: numba
+Requires-Dist: array-api-compat
+Requires-Dist: regex
+Requires-Dist: safetensors
+Requires-Dist: scrapli[asyncssh]<2026.0,>=2024.7.30
+Requires-Dist: scrapli-netconf
+Requires-Dist: ncclient
+Requires-Dist: pygnmi
+Requires-Dist: httpx
+Requires-Dist: ttp
+Requires-Dist: ntc-templates
+Requires-Dist: ciscoconfparse2
+Requires-Dist: netaddr
+Requires-Dist: pyang
+Requires-Dist: yangson
+Requires-Dist: rustworkx
+Requires-Dist: bm25s
+Requires-Dist: usearch
+Requires-Dist: pymupdf
+Requires-Dist: lxml
+Requires-Dist: selectolax
+Requires-Dist: cryptography
+Requires-Dist: pycasbin
+Requires-Dist: transitions
+Requires-Dist: fastapi
+Requires-Dist: uvicorn[standard]
+Requires-Dist: pydantic>=2.0
+Requires-Dist: sqlalchemy[asyncio]>=2.0
+Requires-Dist: aiosqlite
+Requires-Dist: asyncpg
+Requires-Dist: alembic
+Requires-Dist: orjson
+Requires-Dist: psutil
+Requires-Dist: nvidia-ml-py
+Requires-Dist: faster-whisper
+Requires-Dist: piper-tts
+Provides-Extra: gpu
+Requires-Dist: cupy-cuda12x; extra == "gpu"
+Provides-Extra: dev
+Requires-Dist: pytest; extra == "dev"
+Requires-Dist: pytest-asyncio; extra == "dev"
+Requires-Dist: hypothesis; extra == "dev"
+Requires-Dist: ruff; extra == "dev"
+Requires-Dist: pyright; extra == "dev"

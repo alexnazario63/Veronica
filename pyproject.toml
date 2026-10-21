@@ -1,9 +1,38 @@
+[build-system]
+requires = ["setuptools>=68", "wheel"]
+build-backend = "setuptools.build_meta"
+
 [project]
 name = "veronica"
 version = "1.0.0"
 description = "Veronica — Inteligência Artificial Nativa para Engenharia de Redes"
 requires-python = ">=3.11"
+dependencies = [
+  "numpy>=2.0", "numba", "array-api-compat", "regex", "safetensors",
+  "scrapli[asyncssh]>=2024.7.30,<2026.0", "scrapli-netconf", "ncclient", "pygnmi", "httpx",
+  "ttp", "ntc-templates", "ciscoconfparse2", "netaddr", "pyang", "yangson",
+  "rustworkx", "bm25s", "usearch", "pymupdf", "lxml", "selectolax",
+  "cryptography", "pycasbin", "transitions", "fastapi", "uvicorn[standard]",
+  "pydantic>=2.0", "sqlalchemy[asyncio]>=2.0", "aiosqlite", "asyncpg",
+  "alembic", "orjson", "psutil", "nvidia-ml-py", "faster-whisper", "piper-tts",
+]
+
+[project.optional-dependencies]
+gpu = ["cupy-cuda12x"]
+dev = ["pytest", "pytest-asyncio", "hypothesis", "ruff", "pyright"]
+
+[tool.setuptools.packages.find]
+include = ["core*", "knowledge*", "networking*", "safety*", "services*"]
+exclude = ["tests*", "frontend*", "runtime_data*"]
 
 [tool.pytest.ini_options]
 pythonpath = ["."]
 testpaths = ["tests"]
+
+[tool.ruff]
+target-version = "py311"
+exclude = [".venv", "frontend/node_modules", "frontend/dist", "runtime_data"]
+
+[tool.ruff.lint]
+select = ["E4", "E7", "E9", "F"]
+ignore = ["E402", "F841"]

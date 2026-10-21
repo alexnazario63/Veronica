@@ -6,6 +6,7 @@ Neural Observatory em tempo real, RBAC e Bloqueio de Aprovação por Voz.
 """
 
 from pathlib import Path
+import os
 import pytest
 from fastapi.testclient import TestClient
 
@@ -15,7 +16,15 @@ from services.api.app import create_app
 @pytest.fixture(scope="module")
 def client(tmp_path_factory: pytest.TempPathFactory) -> TestClient:
     base_dir: Path = tmp_path_factory.mktemp("veronica_phase16_e2e")
-    app = create_app(base_dir)
+    prior_lock_db = os.environ.get("VERONICA_SAFETY_LOCK_DB")
+    os.environ["VERONICA_SAFETY_LOCK_DB"] = str(base_dir / "safety-locks.sqlite3")
+    try:
+        app = create_app(base_dir)
+    finally:
+        if prior_lock_db is None:
+            os.environ.pop("VERONICA_SAFETY_LOCK_DB", None)
+        else:
+            os.environ["VERONICA_SAFETY_LOCK_DB"] = prior_lock_db
     return TestClient(app)
 
 
@@ -360,6 +369,8 @@ def test_criteria_11_12_rbac_protection_and_voice_approval_prohibition(
             "confirmed_plan_hash": plan["plan_hash"],
             "confirmed_maintenance_window": plan["maintenance_window"],
             "approval_channel": "VOICE",
+            "signature_ed25519": "invalid-by-design",
+            "approval_timestamp": "2026-10-21T12:00:00Z",
         },
         headers={"X-User-Id": "usr-app-01"},
     )
@@ -474,8 +485,8 @@ def test_streaming_chat_and_delete_voice_recordings_privacy(
         assert "text/event-stream" in stream_resp.headers.get("content-type", "")
         lines = [line for line in stream_resp.iter_lines() if line.startswith("data: ")]
         assert len(lines) >= 2
-        assert '"type": "token"' in lines[0]
-        assert '"type": "complete"' in lines[-1]
+        assert '"type":"token"' in lines[0]
+        assert '"type":"complete"' in lines[-1]
 
     # 2. Habilita consentimento, envia turno de voz e exclui gravações de voz
     client.post(
@@ -548,11 +559,8 @@ def test_checkpoint_restore_and_experiments_compare_and_gui_controls(
 
     # Verifica presença dos novos controles na GUI HTML
     html_text = client.get("/").text
-    assert "voiceTranscriptReviewInput" in html_text
-    assert "Excluir Gravações de Voz" in html_text
-    assert "Enviar Feedback / Correção Técnica" in html_text
-    assert "Restaurar" in html_text
-    assert "Comparação de Experimentos" in html_text
+    assert 'id="root"' in html_text
+    assert "assets/index-" in html_text
 
 
 def test_analytical_thinking_and_web_learning_for_specific_queries(

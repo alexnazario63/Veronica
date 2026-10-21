@@ -1,0 +1,7 @@
+{
+  "venvPath": ".",
+  "venv": ".venv",
+  "include": ["core", "knowledge", "networking", "safety", "services"],
+  "exclude": ["runtime_data", "frontend/node_modules", "**/__pycache__"],
+  "typeCheckingMode": "basic"
+}
