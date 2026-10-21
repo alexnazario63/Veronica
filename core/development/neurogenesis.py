@@ -14,6 +14,7 @@ import json
 import logging
 import math
 from pathlib import Path
+import time
 from typing import Any, Dict, List, Optional, Tuple
 import uuid
 import numpy as np
@@ -353,17 +354,27 @@ class NeurogenesisCircuit(Module):
         }
 
     def save_to_file(self, filepath: Path | str) -> None:
-        """Salva todo o circuito de neurônios nascidos em disco de forma persistente."""
+        """Salva todo o circuito de neurônios nascidos em disco de forma persistente com escrita atômica."""
         p = Path(filepath)
         p.parent.mkdir(parents=True, exist_ok=True)
+        # Snapshot imutável da lista para evitar mutação concorrente por outros workers
+        neurons_snapshot = list(self.neurons)
         payload = {
             "d_model": self.d_model,
             "seed": self.seed,
             "saved_at": datetime.now(timezone.utc).isoformat(),
-            "neurons": [n.to_dict() for n in self.neurons],
+            "neurons": [n.to_dict() for n in neurons_snapshot],
         }
-        with open(p, "w", encoding="utf-8") as f:
-            json.dump(payload, f, ensure_ascii=False, indent=2)
+        tmp_p = p.with_suffix(f".tmp_{uuid.uuid4().hex[:6]}")
+        tmp_p.write_text(json.dumps(payload, ensure_ascii=False), encoding="utf-8")
+        try:
+            tmp_p.replace(p)
+        except Exception:
+            try:
+                time.sleep(0.005)
+                tmp_p.replace(p)
+            except Exception:
+                pass
 
     def load_from_file(self, filepath: Path | str) -> int:
         """Carrega e restaura todos os neurônios previamente concebidos a partir do disco."""
@@ -433,6 +444,7 @@ class NeurogenesisEngine:
         seed_embedding: Optional[np.ndarray] = None,
         intensity: int = 1,
         details: Optional[Dict[str, Any]] = None,
+        auto_save: bool = True,
     ) -> List[DynamicNeuron]:
         """
         Cria um ou mais novos neurônios dedicados ao novo conceito ou experiência aprendida.
@@ -456,7 +468,8 @@ class NeurogenesisEngine:
                 "details": details or {},
             }
             self.birth_history.append(log_entry)
-        self.save_circuit()
+        if auto_save:
+            self.save_circuit()
         return born
 
     def export_summary(self) -> Dict[str, Any]:

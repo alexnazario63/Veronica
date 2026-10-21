@@ -1994,7 +1994,8 @@ commit trial 120</textarea>
         'Content-Type': 'application/json',
         'X-User-Id': getSelectedUserId()
       }, options.headers || {});
-      const res = await fetch(url, Object.assign({}, options, { headers }));
+      const signal = options.signal || (typeof AbortSignal !== 'undefined' && AbortSignal.timeout ? AbortSignal.timeout(options.timeout || 15000) : undefined);
+      const res = await fetch(url, Object.assign({}, options, { headers, signal }));
       const contentType = res.headers.get('content-type') || '';
       let data = null;
       if (contentType.includes('application/json')) {
@@ -3805,8 +3806,11 @@ commit trial 120</textarea>
     // ==================== AUTO-APRENDIZADO AUTÔNOMO & NEUROGÊNESE ESPONTÂNEA ====================
     let autoLearningRunning = true;
     let lastAutoLearnStatus = null;
+    let isFetchingAutoLearnStatus = false;
 
     async function loadAutonomousLearningStatus() {
+      if (isFetchingAutoLearnStatus) return;
+      isFetchingAutoLearnStatus = true;
       try {
         const data = await apiFetch('/api/development/autonomous-learning/status');
         autoLearningRunning = data.is_running;
@@ -3931,6 +3935,8 @@ commit trial 120</textarea>
         }
       } catch (err) {
         console.warn('Erro ao atualizar telemetria de auto-aprendizado:', err);
+      } finally {
+        isFetchingAutoLearnStatus = false;
       }
     }
 
@@ -3998,7 +4004,14 @@ commit trial 120</textarea>
       if (el) el.textContent = `~${tps.toLocaleString('pt-BR')} pensamentos/s`;
     }
 
+    let isSavingAutoConfig = false;
     async function saveAutoLearnConfig() {
+      if (isSavingAutoConfig) return;
+      isSavingAutoConfig = true;
+      const saveBtn = document.querySelector('#autoLearnConfigModal .btn-success');
+      const originalText = saveBtn ? saveBtn.textContent : '';
+      if (saveBtn) { saveBtn.disabled = true; saveBtn.textContent = 'Salvando...'; }
+
       const workers = parseInt(document.getElementById('modalWorkersSlider')?.value || '4');
       const interval_ms = Math.max(2, parseFloat(document.getElementById('modalIntervalMsInput')?.value || '2'));
 
@@ -4012,16 +4025,28 @@ commit trial 120</textarea>
         await loadAutonomousLearningStatus();
       } catch (err) {
         showToast('Erro ao configurar: ' + err.message, 'error');
+      } finally {
+        isSavingAutoConfig = false;
+        if (saveBtn) { saveBtn.disabled = false; saveBtn.textContent = originalText; }
       }
     }
 
+    let isTogglingAutoLearning = false;
     async function toggleAutonomousLearning() {
+      if (isTogglingAutoLearning) return;
+      isTogglingAutoLearning = true;
+      const btn = document.getElementById('btnToggleAutoLearn');
+      if (btn) btn.disabled = true;
+
       try {
         const endpoint = autoLearningRunning ? '/api/development/autonomous-learning/stop' : '/api/development/autonomous-learning/start';
         await apiFetch(endpoint, { method: 'POST' });
         await loadAutonomousLearningStatus();
       } catch (err) {
         showToast('Erro ao alterar status de auto-aprendizado: ' + err.message, 'error');
+      } finally {
+        isTogglingAutoLearning = false;
+        if (btn) btn.disabled = false;
       }
     }
 
@@ -4035,7 +4060,10 @@ commit trial 120</textarea>
       }
     }
 
+    let isChangingAutoInterval = false;
     async function changeAutoLearnInterval(val) {
+      if (isChangingAutoInterval) return;
+      isChangingAutoInterval = true;
       try {
         const sec = Math.max(0.002, parseFloat(val));
         await apiFetch('/api/development/autonomous-learning/interval', {
@@ -4045,6 +4073,8 @@ commit trial 120</textarea>
         await loadAutonomousLearningStatus();
       } catch (err) {
         showToast('Erro ao configurar intervalo: ' + err.message, 'error');
+      } finally {
+        isChangingAutoInterval = false;
       }
     }
 

@@ -120,8 +120,8 @@ class AutonomousCognitiveDaemon:
 
         self._stop_event = threading.Event()
         self._threads: List[threading.Thread] = []
-        self._lock = threading.Lock()
-        self._cycle_lock = threading.Lock()
+        self._lock = threading.RLock()
+        self._cycle_lock = threading.RLock()
         self._last_disk_save = time.time()
 
         if auto_start:
@@ -145,10 +145,10 @@ class AutonomousCognitiveDaemon:
                 if new_workers != self.workers:
                     was_running = self.is_running
                     if was_running:
-                        self.stop()
+                        self._stop_locked()
                     self.workers = new_workers
                     if was_running:
-                        self.start()
+                        self._start_locked()
 
             logger.info(
                 f"Configuração de Auto-Aprendizado atualizada: {self.workers} workers, "
@@ -159,60 +159,67 @@ class AutonomousCognitiveDaemon:
     def start(self) -> Dict[str, Any]:
         """Inicia os workers de segundo plano para pensar e criar neurônios autonomamente em paralelo."""
         with self._lock:
-            if self.is_running and any(t.is_alive() for t in self._threads):
-                return self.get_status()
-
-            self._stop_event.clear()
-            self._threads.clear()
-            self.is_running = True
-
-            for i in range(self.workers):
-                worker_id = i + 1
-                t = threading.Thread(
-                    target=self._run_worker,
-                    args=(worker_id,),
-                    name=f"VeronicaWorker-{worker_id}",
-                    daemon=True,
-                )
-                t.start()
-                self._threads.append(t)
-
+            self._start_locked()
             logger.info(
                 f"Daemon de Auto-Aprendizado da Veronica INICIADO com {self.workers} workers "
                 f"a cada {self.interval_seconds * 1000:.1f}ms."
             )
             return self.get_status()
 
+    def _start_locked(self) -> None:
+        """Inicializa os workers assumindo que self._lock já está retido."""
+        if self.is_running and any(t.is_alive() for t in self._threads):
+            return
+
+        self._stop_event.clear()
+        self._threads.clear()
+        self.is_running = True
+
+        for i in range(self.workers):
+            worker_id = i + 1
+            t = threading.Thread(
+                target=self._run_worker,
+                args=(worker_id,),
+                name=f"VeronicaWorker-{worker_id}",
+                daemon=True,
+            )
+            t.start()
+            self._threads.append(t)
+
     def stop(self) -> Dict[str, Any]:
         """Pausa todos os workers de auto-aprendizado sem perder neurônios ou memórias."""
         with self._lock:
-            self._stop_event.set()
-            self.is_running = False
-
-            # Força salvamento em disco de todo o progresso acumulado
-            self._flush_to_disk()
-
-            # Aguarda encerramento rápido dos workers
-            for t in self._threads:
-                if t.is_alive():
-                    t.join(timeout=0.15)
-            self._threads.clear()
-
+            self._stop_locked()
             logger.info("Daemon de Auto-Aprendizado Autônomo da Veronica PAUSADO com sucesso.")
             return self.get_status()
 
+    def _stop_locked(self) -> None:
+        """Pausa os workers e persiste o estado assumindo que self._lock já está retido."""
+        self._stop_event.set()
+        self.is_running = False
+
+        # Aguarda encerramento imediato dos workers (acordados instantaneamente pelo _stop_event)
+        for t in self._threads:
+            if t.is_alive():
+                t.join(timeout=0.08)
+        self._threads.clear()
+
+        # Força salvamento em disco de todo o progresso acumulado após parada dos workers
+        self._flush_to_disk()
+
     def _flush_to_disk(self) -> None:
         """Sincroniza imediatamente neurônios e memórias com o armazenamento persistente."""
-        try:
-            if hasattr(self.dev, "neurogenesis") and hasattr(self.dev.neurogenesis, "save_circuit"):
-                self.dev.neurogenesis.save_circuit()
-            if hasattr(self.dev, "memory") and hasattr(self.dev.memory, "auto_save_binary"):
-                self.dev.memory.auto_save_binary()
-        except Exception as exc:
-            logger.warning(f"Erro ao salvar progresso em disco: {exc}")
+        with self._cycle_lock:
+            try:
+                if hasattr(self.dev, "neurogenesis") and hasattr(self.dev.neurogenesis, "save_circuit"):
+                    self.dev.neurogenesis.save_circuit()
+                if hasattr(self.dev, "memory") and hasattr(self.dev.memory, "auto_save_binary"):
+                    self.dev.memory.auto_save_binary()
+            except Exception as exc:
+                logger.warning(f"Erro ao salvar progresso em disco: {exc}")
 
     def _run_worker(self, worker_id: int) -> None:
-        """Loop executado por cada worker em paralelo com intervalo até 2ms."""
+        """Loop executado por cada worker em paralelo com encerramento instantâneo."""
         while not self._stop_event.is_set():
             try:
                 self.step_cycle(worker_id=worker_id)
@@ -220,8 +227,10 @@ class AutonomousCognitiveDaemon:
                 logger.error(f"Erro no ciclo do worker {worker_id}: {exc}", exc_info=False)
 
             # Intervalo mínimo de até 2ms (0.002s) por worker
+            # Usa wait() para acordar imediatamente (<1ms) caso stop seja acionado
             sleep_time = max(0.002, self.interval_seconds)
-            time.sleep(sleep_time)
+            if self._stop_event.wait(timeout=sleep_time):
+                break
 
     def step_cycle(self, worker_id: int = 1) -> Dict[str, Any]:
         """
@@ -232,7 +241,13 @@ class AutonomousCognitiveDaemon:
         4. Salva no armazenamento binário de alta performance
         5. Consolida sinapses e amadurece ontogeneticamente
         """
+        if self._stop_event.is_set():
+            return {}
+
         with self._cycle_lock:
+            if self._stop_event.is_set():
+                return {}
+
             self.cycles_completed += 1
             current_cycle = self.cycles_completed
             now_iso = datetime.now(timezone.utc).isoformat()
@@ -251,7 +266,7 @@ class AutonomousCognitiveDaemon:
             self.current_thought = thought_narrative
 
             born_neurons: List[Any] = []
-            # 2. Neurogênese Espontânea em Segundo Plano
+            # 2. Neurogênese Espontânea em Segundo Plano (auto_save=False para alto throughput sem travar I/O)
             if hasattr(self.dev, "neurogenesis") and self.dev.neurogenesis:
                 born_neurons = self.dev.neurogenesis.trigger_neurogenesis_for_concept(
                     concept=concept,
@@ -264,6 +279,7 @@ class AutonomousCognitiveDaemon:
                         "spark": base_insight,
                         "spontaneous": True,
                     },
+                    auto_save=False,
                 )
                 self.autonomous_neurons_born += len(born_neurons)
 
@@ -306,10 +322,12 @@ class AutonomousCognitiveDaemon:
                     summary=f"Insight [W{worker_id}] #{current_cycle}: {base_insight[:70]}",
                 )
 
-                # 4. Salva periodicamente na memória binária (com throttling para manter alto FPS a 2ms)
+                # 4. Salva periodicamente na memória binária e no circuito neural (throttled para alto FPS a 2ms)
                 now_t = time.time()
-                if now_t - self._last_disk_save >= 0.25 or current_cycle % 25 == 0:
+                if now_t - self._last_disk_save >= 0.5 or current_cycle % 50 == 0:
                     self._last_disk_save = now_t
+                    if hasattr(self.dev, "neurogenesis") and hasattr(self.dev.neurogenesis, "save_circuit"):
+                        self.dev.neurogenesis.save_circuit()
                     if hasattr(self.dev.memory, "auto_save_binary"):
                         self.dev.memory.auto_save_binary()
 
