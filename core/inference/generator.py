@@ -156,6 +156,10 @@ class AutoregressiveGenerator:
         Gera tokens progressivamente, emitindo cada fragmento decodificado e sua probabilidade.
         """
         cfg = gen_cfg or GenerationConfig()
+        max_seq_len = max(2, int(self.model.config.max_seq_len))
+        # Keep the prompt and generated tokens inside the model's positional
+        # window. Oversized profiles used to read past RoPE's cache and crash.
+        max_new_tokens = max(1, min(int(cfg.max_new_tokens), max_seq_len - 1))
         rng = np.random.default_rng(cfg.seed)
         self.model.eval()
 
@@ -163,7 +167,7 @@ class AutoregressiveGenerator:
             prompt,
             add_bos=True,
             add_eos=False,
-            max_length=max(self.model.config.max_seq_len - cfg.max_new_tokens, 16),
+            max_length=max(1, max_seq_len - max_new_tokens),
         )
         if not prompt_ids:
             prompt_ids = [self.tokenizer.bos_id]
@@ -175,7 +179,7 @@ class AutoregressiveGenerator:
         if cached_prefix is not None:
             past_kvs, first_logits = cached_prefix
 
-        for step in range(cfg.max_new_tokens):
+        for step in range(max_new_tokens):
             if should_cancel is not None and should_cancel():
                 break
 

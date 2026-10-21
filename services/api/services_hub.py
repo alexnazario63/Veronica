@@ -876,17 +876,11 @@ class ChatService:
                 plain_intro = re.split(r"```", content_md, maxsplit=1)[0]
                 compact = spoken_summary or re.split(r"(?<=[.!?])\s+", re.sub(r"(?m)^#{1,6}\s*|\*\*", "", plain_intro), maxsplit=1)[0]
                 content_md = compact[:520].rstrip()
-            elif model_profile == "vrn-ultra":
+            elif model_profile == "vrn-ultra" and intent != "GREETING":
                 details: List[str] = []
                 claims = payload.get("retrieved_claims", [])
                 if isinstance(claims, list):
                     details.extend(f"- {str(claim)[:500]}" for claim in claims[:6] if claim)
-                epistemic = payload.get("epistemic_breakdown", {})
-                if isinstance(epistemic, dict):
-                    for field, label in (("verified_facts", "Fatos verificados"), ("technical_inferences", "Inferências técnicas"), ("hypotheses", "Hipóteses")):
-                        items = epistemic.get(field, [])
-                        if isinstance(items, list) and items:
-                            details.append(f"**{label}:** " + "; ".join(str(item)[:300] for item in items[:4]))
                 limits = payload.get("limitations_and_unknowns", [])
                 if isinstance(limits, list) and limits:
                     details.append("**Limitações:** " + "; ".join(str(item)[:300] for item in limits[:4]))
@@ -894,7 +888,7 @@ class ChatService:
                 if isinstance(sources, list) and sources:
                     details.append("**Fontes consultadas:** " + "; ".join(str(source.get("title") or source.get("source_uri") or "Fonte") for source in sources[:5] if isinstance(source, dict)))
                 if details:
-                    content_md = f"{content_md}\n\n### Análise ampliada\n\n" + "\n\n".join(details)
+                    content_md = f"{content_md}\n\n" + "\n\n".join(details)
 
             if response_style == "natural":
                 blocks = re.split(r"(```[\s\S]*?```)", content_md)
@@ -1082,51 +1076,30 @@ class ChatService:
 
         # 1. Fluxo Conversacional de Saudação / Apresentação
         if intent == "GREETING":
-            spoken_summary = "Olá! Eu sou a Verônica, sua especialista em engenharia de redes. Como posso te ajudar hoje?"
+            spoken_summary = "Ol\u00e1! Como posso ajudar?"
             if op_mode == "agent":
-                formatted_markdown = (
-                    "### 🤖 Veronica — Modo Agente Autônomo Ativado\n\n"
-                    "**🧠 Thought:** Sistema pronto para planejar autonomamente investigações de rede, correlacionar telemetria e propor intervenções seguras.\n"
-                    "**⚡ Action:** Monitorando equipamentos do Digital Twin e aguardando definição de escopo ou incidente operacional.\n"
-                    "**🔍 Observation:** Modelos neurais carregados, memória binária sincronizada e políticas de salvaguarda ativas."
-                )
+                formatted_markdown = "Ol\u00e1! Sou a Ver\u00f4nica. Posso pesquisar, analisar um problema ou ajudar a planejar uma mudan\u00e7a. O que voc\u00ea precisa?"
             elif op_mode == "work":
-                formatted_markdown = (
-                    "### 🛠️ Veronica — Modo Operacional & Artefatos de Engenharia\n\n"
-                    "Pronta para gerar procedimentos operacionais padrão (MOPs), scripts de automação Netmiko/CLI, "
-                    "regras de firewall e configurações multi-vendor validadas (Huawei VRP, Cisco IOS-XR/XE, Juniper Junos, MikroTik RouterOS)."
-                )
+                formatted_markdown = "Ol\u00e1! Posso ajudar a revisar configura\u00e7\u00f5es, comandos ou um plano de mudan\u00e7a. Qual o escopo?"
             else:
-                formatted_markdown = (
-                    "Olá! Sou a **Verônica**, sua parceira de engenharia de redes, diagnóstico e automação.\n\n"
-                    "Estou conectada ao ambiente de rede com acesso a documentações oficiais de fabricantes e memória de aprendizado contínuo. "
-                    "Podemos investigar anomalias de protocolos (BGP, OSPF, MPLS), planejar mudanças seguras com diff e rollback, "
-                    "ou consultar sintaxes e topologias multi-vendor.\n\n"
-                    "Em que posso colaborar com você agora?"
-                )
+                formatted_markdown = "Ol\u00e1! Sou a Ver\u00f4nica. Como posso ajudar?"
 
             structured_response = {
                 "agent_name": "Veronica",
                 "model_version": self.trainer.model_version,
                 "intent": intent,
                 "mode": op_mode,
-                "diagnosis": "Verônica pronta para operação técnica e assistência em engenharia de redes.",
-                "epistemic_breakdown": {
-                    "verified_facts": ["Sessão conversacional interativa ativa.", "Motor neural e memória binária Veronica carregados."],
-                    "technical_inferences": ["Operador conectado aguardando diagnóstico ou planejamento operacional."],
-                    "hypotheses": ["Nenhum incidente de rede pendente submetido nesta mensagem."]
-                },
-                "evidences": ["Motor neural VeronicaTransformer operacional."],
+                "epistemic_breakdown": {"verified_facts": [], "technical_inferences": [], "hypotheses": []},
+                "evidences": [],
                 "technical_sources": [],
-                "compatibility": ["Huawei VRP, Cisco IOS-XR/XE, Junos OS, RouterOS 7, Nokia SR OS, Arista EOS."],
-                "risk": "BAIXO (Atendimento consultivo)",
+                "compatibility": [],
+                "risk": "",
                 "safe_diagnostic_commands": [],
                 "proposed_commands": [],
                 "validation_plan": [],
                 "rollback_plan": [],
                 "limitations_and_unknowns": [],
                 "spoken_summary": spoken_summary,
-                "confidence": 1.0,
             }
             return _finalize_and_record_memory(formatted_markdown, structured_response)
 
@@ -1780,71 +1753,41 @@ class ChatService:
         root_causes = diag.get("root_causes", [])
         spoken_cause = "; ".join(root_causes) if root_causes else "análise técnica concluída sem anomalias no escopo"
         spoken_summary = (
-            f"Concluí a análise técnica dos equipamentos. "
-            f"Identifiquei: {spoken_cause}. "
-            f"Os comandos de diagnóstico e o plano de ação seguro já estão prontos na sua tela para sua revisão."
+            f"Identifiquei: {spoken_cause}." if root_causes
+            else "Não consegui determinar a causa raiz com os dados disponíveis."
         )
 
-        diagnosis_summary = (
-            "; ".join(root_causes)
-            if root_causes
-            else f"Investigação técnica concluída nos equipamentos {', '.join(diag.get('involved_devices', [])) or 'sob escopo'}."
-        )
+        diagnosis_summary = "; ".join(root_causes) if root_causes else ""
 
-        verified_facts = diag["epistemic_breakdown"].get("verified_facts", []) or ["Telemetria coletada no ambiente."]
-        technical_inferences = diag["epistemic_breakdown"].get("technical_inferences", []) or ["Análise inferencial de protocolos realizada."]
-        hypotheses = diag["epistemic_breakdown"].get("hypotheses", []) or ["Validação de conectividade e parâmetros de Camada 3 recomendada."]
+        epistemic = diag.get("epistemic_breakdown", {})
+        verified_facts = epistemic.get("verified_facts", []) if isinstance(epistemic, dict) else []
+        technical_inferences = epistemic.get("technical_inferences", []) if isinstance(epistemic, dict) else []
+        hypotheses = epistemic.get("hypotheses", []) if isinstance(epistemic, dict) else []
+        epistemic_text = ""
 
         safe_cmds = diag.get("safe_diagnostic_commands", [])
-        safe_cmds_fmt = "\n".join(safe_cmds) if safe_cmds else "# Nenhum comando safe diagnostic adicional necessário"
+        safe_cmds_fmt = "\n".join(safe_cmds)
         proposed_cmds = diag.get("proposed_remediation_commands", [])
-        proposed_cmds_fmt = "\n".join(proposed_cmds) if proposed_cmds else "# Nenhuma alteração invasiva de configuração necessária"
+        proposed_cmds_fmt = "\n".join(proposed_cmds)
 
-        devices_str = ", ".join(f"**{d}**" for d in diag.get("involved_devices", [])) or "equipamentos da rede"
+        devices_str = ", ".join(f"**{d}**" for d in diag.get("involved_devices", []))
 
-        mem_context = ""
-        if relevant_memories:
-            mem_context = "*(Consultando minha memória de máquina binária, correlacionei experiências prévias com sintomas similares.)*\n\n"
-
-        risk_str = (
-            "ALTO (Alteração em protocolo de roteamento de Core — exige Fluxo Seguro de 10 Etapas e Aprovação Humana)"
-            if proposed_cmds
-            else "BAIXO (Operação estritamente somente leitura)"
-        )
+        risk_str = diag.get("risk", "")
 
         if op_mode == "agent":
             formatted_markdown = (
-                f"### 🤖 Veronica — Modo Agente Autônomo\n\n"
-                f"**🧠 Thought (Raciocínio & Planejamento):**\n"
-                f"Iniciei a investigação do incidente reportado em {devices_str}. "
-                f"Sintoma central: *{diagnosis_summary}*. "
-                f"Planejamento autônomo: correlacionar fatos de telemetria, validar premissas de conectividade e formular hipóteses técnicas com testes somente leitura.\n\n"
-                f"**⚡ Action (Execução de Testes Somente Leitura):**\n"
-                f"```cli\n{safe_cmds_fmt}\n```\n\n"
-                f"**🔍 Observation (Observações & Quebra Epistêmica):**\n"
-                f"- **Fatos Confirmados:** " + "; ".join(verified_facts) + "\n"
-                "- **Inferências Técnicas:** " + "; ".join(technical_inferences) + "\n"
-                "- **Hipóteses em Validação:** " + "; ".join(hypotheses) + "\n\n"
-                f"**🎯 Causa-Raiz & Próximo Passo Autônomo:**\n"
-                f"Diagnóstico: **{diagnosis_summary}**.\n"
-                + (f"Proposta de remediação pronta para o Fluxo Seguro de 10 Etapas:\n```cli\n{proposed_cmds_fmt}\n```" if proposed_cmds else "Ambiente estável para este escopo.")
+                (f"**Diagnóstico:** {diagnosis_summary}\n\n" if diagnosis_summary else "")
+                + (f"**Evidências e análise:**\n{epistemic_text}\n\n" if epistemic_text else "")
+                + (f"**Comandos de verificação:**\n```cli\n{safe_cmds_fmt}\n```\n\n" if safe_cmds else "")
+                + (f"**Remediação proposta:**\n```cli\n{proposed_cmds_fmt}\n```" if proposed_cmds else "")
             )
         elif op_mode == "work":
             formatted_markdown = (
-                f"### 🛠️ Veronica — Modo Operacional & Artefatos de Engenharia\n\n"
-                f"**Escopo:** Investigação e remediação técnica em {devices_str}.\n"
-                f"**Diagnóstico Técnico:** {diagnosis_summary}\n\n"
-                f"#### 📋 Artefato CLI: Script de Diagnóstico e Validação (Somente Leitura)\n"
-                f"```cli\n{safe_cmds_fmt}\n```\n\n"
-                f"#### 🔧 Script de Remediação Proposto (Sujeito a Aprovação Humana)\n"
-                f"```cli\n{proposed_cmds_fmt}\n```\n\n"
-                f"#### 🛡️ Plano de Segurança e Rollback\n"
-                f"- **Matriz de Risco:** {risk_str}\n"
-                f"- **Rollback Nativo:** Reversão automática via commit trial / commit confirmed caso os testes pós-mudança falhem.\n\n"
-                f"#### 📊 Matriz Epistêmica\n"
-                f"- **Fatos:** " + "; ".join(verified_facts) + "\n"
-                "- **Inferências:** " + "; ".join(technical_inferences) + "\n"
-                "- **Hipóteses:** " + "; ".join(hypotheses)
+                (f"**Escopo:** {devices_str}\n\n" if devices_str else "")
+                + (f"**Diagnóstico:** {diagnosis_summary}\n\n" if diagnosis_summary else "")
+                + (f"**Evidências e análise:**\n{epistemic_text}\n\n" if epistemic_text else "")
+                + (f"**Comandos de verificação:**\n```cli\n{safe_cmds_fmt}\n```\n\n" if safe_cmds else "")
+                + (f"**Remediação proposta:**\n```cli\n{proposed_cmds_fmt}\n```" if proposed_cmds else "")
             )
         else:
             # Modo CHAT: diálogo humano, fluido, direto e inteligente
@@ -1856,19 +1799,14 @@ class ChatService:
                 )
 
             formatted_markdown = (
-                f"{mem_context}"
-                f"Olá! Analisei a situação relatada em {devices_str}.\n\n"
-                f"**Diagnóstico:** {diagnosis_summary}.\n\n"
-                f"**Fatos Verificados:**\n"
-                + "\n".join(f"- {f}" for f in verified_facts)
-                + "\n\n**Inferências Técnicas:**\n"
-                + "\n".join(f"- {i}" for i in technical_inferences)
-                + "\n\n**Hipóteses em Validação:**\n"
-                + "\n".join(f"- {h}" for h in hypotheses)
-                + f"\n\n**Comandos Recomendados para Verificação Imediata (Somente Leitura):**\n```cli\n{safe_cmds_fmt}\n```\n\n"
+                + (f"**Diagnóstico:** {diagnosis_summary}\n\n" if diagnosis_summary else "")
+                + (f"{epistemic_text}\n\n" if epistemic_text else "")
+                + (f"**Comandos de verificação:**\n```cli\n{safe_cmds_fmt}\n```\n\n" if safe_cmds else "")
                 + remediation_text
-                + "Posso aplicar o roteiro de diagnóstico completo ou detalhar o plano de rollback quando você autorizar!"
             )
+
+        if not formatted_markdown.strip():
+            formatted_markdown = "Não encontrei dados suficientes para responder com segurança. Pode compartilhar mais contexto?"
 
         structured_response = {
             "agent_name": "Veronica",
@@ -1887,15 +1825,8 @@ class ChatService:
             "risk": risk_str,
             "safe_diagnostic_commands": safe_cmds,
             "proposed_commands": proposed_cmds,
-            "validation_plan": [
-                "1. Coletar baseline completo antes da mudança (hash SHA-256 da running-config).",
-                "2. Executar comandos de diagnóstico somente leitura antes e imediatamente após a aplicação.",
-                "3. Confirmar estado Established/FULL e ausência de alarmes ópticos ou perda de pacotes.",
-            ],
-            "rollback_plan": [
-                "Utilizar mecanismo nativo de commit confirmado (`commit trial 120` no Huawei VRP 8 / `commit confirmed 120` no Cisco IOS-XR e Junos).",
-                "Em caso de falha na pós-validação (Etapa 8), executar reversão automática para o backup validado.",
-            ],
+            "validation_plan": diag.get("validation_plan", []),
+            "rollback_plan": diag.get("rollback_plan", []),
             "limitations_and_unknowns": (
                 diag.get("unknown_or_limitations", [])
                 + diag.get("obsolete_doc_warnings", [])
@@ -2633,7 +2564,7 @@ class VeronicaPlatformHub:
             technical_evidence = [item for item in evidence if not (isinstance(item, dict) and "response_preferences" in item)]
             selected_profile = preferences.get("model_profile", "vrn-pro")
             selected_style = preferences.get("response_style", "technical")
-            token_budget = {"vrn-fast": 64, "vrn-pro": 128, "vrn-ultra": 256}.get(selected_profile, 128)
+            token_budget = {"vrn-fast": 48, "vrn-pro": 56, "vrn-ultra": 64}.get(selected_profile, 56)
             style_guidance = {
                 "technical": "Use linguagem tecnica precisa, defina termos quando necessario e diferencie fatos de inferencias.",
                 "natural": "Converse de forma clara e natural, sem cabecalhos ou jargao desnecessario.",
@@ -2681,12 +2612,17 @@ class VeronicaPlatformHub:
                     "answer": {"type": "string"},
                 },
             }
-            generated = await asyncio.to_thread(
-                self.generator.generate_text,
-                instruction,
-                GenerationConfig(max_new_tokens=token_budget, temperature=0.1, greedy=True),
-                tool_schema=tool_schema,
-            )
+            try:
+                generated = await asyncio.to_thread(
+                    self.generator.generate_text,
+                    instruction,
+                    GenerationConfig(max_new_tokens=token_budget, temperature=0.1, greedy=True),
+                    tool_schema=tool_schema,
+                )
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).exception("Veronica local agent generation failed")
+                return {"answer": f"A geração local falhou ({type(exc).__name__}). Nenhuma ferramenta foi executada; tente novamente com VRN-fast ou VRN-pro."}
             output = str(generated.get("text", "")).strip()
             # A malformed model response is always treated as plain text; it cannot
             # become a tool invocation through partial JSON recovery.
