@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
-import { Activity, ArrowLeft, BrainCircuit, Check, Database, HardDrive, Play, RefreshCw, Save, Settings2, Sparkles, Square } from 'lucide-react';
+import { Activity, ArrowLeft, BrainCircuit, Check, Database, HardDrive, Moon, Play, RefreshCw, Save, Settings2, Sparkles, Square, Sun } from 'lucide-react';
 
 type Neuron = {
   neuron_id: string;
@@ -34,7 +34,7 @@ const api = async <T,>(path: string, init?: RequestInit): Promise<T> => {
   return response.json();
 };
 
-export default function Admin({ onBack }: { onBack: () => void }) {
+export default function Admin({ onBack, onToggleTheme, theme }: { onBack: () => void; onToggleTheme: () => void; theme: 'light' | 'dark' }) {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [graph, setGraph] = useState<Graph | null>(null);
   const [researchQuality, setResearchQuality] = useState<ResearchQuality | null>(null);
@@ -183,7 +183,7 @@ export default function Admin({ onBack }: { onBack: () => void }) {
   const binary = overview?.binary_memory || {};
 
   return <main className="admin-page">
-    <header className="admin-topbar"><button className="back-link" onClick={onBack}><ArrowLeft size={17}/> Workspace</button><div className="admin-title"><span className="admin-mark"><Settings2 size={18}/></span><div><b>Administração</b><small>Memória e configuração do motor</small></div></div><button className="refresh-button" onClick={() => void refresh()}><RefreshCw size={15}/> Atualizar</button></header>
+    <header className="admin-topbar"><button className="back-link" onClick={onBack}><ArrowLeft size={17}/> Workspace</button><div className="admin-title"><span className="admin-mark"><Settings2 size={18}/></span><div><b>Administração</b><small>Memória e configuração do motor</small></div></div><div className="admin-actions"><button className="refresh-button" onClick={onToggleTheme} aria-label={`Ativar tema ${theme === 'light' ? 'escuro' : 'claro'}`}>{theme === 'light' ? <Moon size={15}/> : <Sun size={15}/>} Tema</button><button className="refresh-button" onClick={() => void refresh()}><RefreshCw size={15}/> Atualizar</button></div></header>
     {notice && <div className="admin-notice">{notice}<button onClick={() => setNotice('')}>Fechar</button></div>}
     <div className="admin-content">
       <div className="admin-heading"><div><p className="admin-eyebrow">VISÃO INTERNA</p><h1>Como a Veronica está funcionando</h1><p>Memória associativa, estado do modelo e controles de aprendizado local em um só lugar.</p></div><span className={`runtime-pill ${runtime?.is_running ? 'running' : ''}`}><i/>{runtime?.is_running ? 'Aprendizado ativo' : 'Aprendizado pausado'}</span></div>

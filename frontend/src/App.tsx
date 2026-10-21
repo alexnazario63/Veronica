@@ -1,13 +1,15 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
-import { Activity, ArrowUp, Bot, BrainCircuit, Check, ChevronDown, CircleHelp, ClipboardList, Command, FileText, Gauge, GitBranch, Network, Plus, Search, Settings2, ShieldCheck, Square, Wrench } from 'lucide-react';
+import { Activity, ArrowUp, Bot, BrainCircuit, Check, ChevronDown, CircleHelp, ClipboardList, Command, FileText, Gauge, GitBranch, Menu, Moon, Network, Plus, Search, Settings2, ShieldCheck, Square, Sun, Trash2, Wrench } from 'lucide-react';
 import { create } from 'zustand';
 import cytoscape, { type ElementDefinition } from 'cytoscape';
 import type { ArchitectureNode, StructuredAssistantPayload, TrainingStepMetric } from './types/veronica';
 const Admin = lazy(() => import('./Admin'));
 
 type View = 'work' | 'observatory' | 'admin';
-type Message = { role: 'user' | 'assistant'; content: string; payload?: StructuredAssistantPayload };
+type Message = { role: 'user' | 'assistant'; content: string; payload?: StructuredAssistantPayload; profile?: ModelProfile; style?: ResponseStyle };
 type Conversation = { conversation_id: string; title: string };
+type ModelProfile = 'vrn-fast' | 'vrn-pro' | 'vrn-ultra';
+type ResponseStyle = 'technical' | 'natural' | 'mixed' | 'engineer';
 type Artifact = { id: string; version: number; type: string; baseline_content?: string | null; proposed_content?: string | null; blast_radius_graph?: Record<string, unknown> | null; change_stage?: string | null; sha256_hash: string };
 type StoredArtifact = { artifact: Artifact; created_at?: string };
 type Store = { view: View; setView: (view: View) => void; artifact: Artifact | null; setArtifact: (artifact: Artifact | null) => void };
@@ -34,6 +36,19 @@ export default function VeronicaApp() {
   const [thoughts, setThoughts] = useState<string[]>([]);
   const [tools, setTools] = useState<string[]>([]);
   const [historyOpen, setHistoryOpen] = useState(true);
+  const [sidebarOpen, setSidebarOpen] = useState(false);
+  const [theme, setTheme] = useState<'light' | 'dark'>(() => {
+    try { return localStorage.getItem('veronica-theme') === 'dark' ? 'dark' : 'light'; }
+    catch { return 'light'; }
+  });
+  const [modelProfile, setModelProfile] = useState<ModelProfile>(() => {
+    try { const saved = localStorage.getItem('veronica-model-profile'); return saved === 'vrn-fast' || saved === 'vrn-ultra' ? saved : 'vrn-pro'; }
+    catch { return 'vrn-pro'; }
+  });
+  const [responseStyle, setResponseStyle] = useState<ResponseStyle>(() => {
+    try { const saved = localStorage.getItem('veronica-response-style'); return saved === 'natural' || saved === 'mixed' || saved === 'engineer' ? saved : 'technical'; }
+    catch { return 'technical'; }
+  });
   const aborter = useRef<AbortController | null>(null);
   const logLines = useMemo(() => draft.split('\n').length, [draft]);
   const displayDraft = logLines > 14 ? `[Log: ${logLines} linhas]` : draft;
@@ -44,6 +59,15 @@ export default function VeronicaApp() {
     return () => window.removeEventListener('popstate', syncRoute);
   }, [setView]);
 
+  useEffect(() => {
+    document.documentElement.dataset.theme = theme;
+    try { localStorage.setItem('veronica-theme', theme); } catch { /* storage can be unavailable */ }
+  }, [theme]);
+  useEffect(() => {
+    try { localStorage.setItem('veronica-model-profile', modelProfile); localStorage.setItem('veronica-response-style', responseStyle); }
+    catch { /* storage can be unavailable */ }
+  }, [modelProfile, responseStyle]);
+
   const refresh = async () => {
     try {
       const [c, inventory, saved] = await Promise.all([api<{ conversations: Conversation[] }>('/api/conversations'), api<{ devices: typeof devices }>('/api/network/inventory'), api<{ artifacts: StoredArtifact[] }>('/api/workspace/artifacts').catch(() => ({ artifacts: [] }))]);
@@ -52,13 +76,22 @@ export default function VeronicaApp() {
   };
   useEffect(() => { void refresh(); }, []);
   async function selectConversation(id: string) {
-    setConversationId(id); setError('');
-    try { const data = await api<{ messages?: { role: string; content: string; structured_payload?: StructuredAssistantPayload }[] }>(`/api/conversations/${id}`); setMessages((data.messages || []).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content, payload: m.structured_payload }))); }
+    setConversationId(id); setError(''); setSidebarOpen(false);
+    try { const data = await api<{ messages?: { role: string; content: string; structured_payload?: StructuredAssistantPayload & { model_profile?: string; response_style?: string } }[] }>(`/api/conversations/${id}`); setMessages((data.messages || []).map(m => ({ role: m.role === 'user' ? 'user' : 'assistant', content: m.content, payload: m.structured_payload, profile: ['vrn-fast', 'vrn-pro', 'vrn-ultra'].includes(m.structured_payload?.model_profile || '') ? m.structured_payload?.model_profile as ModelProfile : undefined, style: ['technical', 'natural', 'mixed', 'engineer'].includes(m.structured_payload?.response_style || '') ? m.structured_payload?.response_style as ResponseStyle : undefined }))); }
     catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível abrir a conversa'); }
   }
   async function newConversation() {
-    try { const c = await api<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: 'Nova conversa' }) }); await refresh(); setConversationId(c.conversation_id); setMessages([]); }
+    try { const c = await api<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: 'Nova conversa' }) }); await refresh(); setConversationId(c.conversation_id); setMessages([]); setSidebarOpen(false); }
     catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível criar conversa'); }
+  }
+  async function deleteConversation(event: React.MouseEvent, conversation: Conversation) {
+    event.stopPropagation();
+    if (!window.confirm(`Excluir a conversa “${conversation.title || 'Conversa sem título'}”? Esta ação não pode ser desfeita.`)) return;
+    try {
+      await api<{ deleted: boolean }>(`/api/conversations/${encodeURIComponent(conversation.conversation_id)}`, { method: 'DELETE' });
+      setConversations(current => current.filter(item => item.conversation_id !== conversation.conversation_id));
+      if (conversationId === conversation.conversation_id) { aborter.current?.abort(); setConversationId(''); setMessages([]); setThoughts([]); setTools([]); }
+    } catch (e) { setError(e instanceof Error ? e.message : 'Não foi possível excluir a conversa'); }
   }
   async function openStoredArtifact(id: string, version: number) {
     try { const result = await api<{ versions: StoredArtifact[] }>(`/api/workspace/artifacts/${encodeURIComponent(id)}/versions`); const selected = result.versions.find(row => row.artifact.version === version)?.artifact; if (selected) setArtifact(selected); }
@@ -68,11 +101,11 @@ export default function VeronicaApp() {
     const content = draft.trim(); if (!content || busy) return;
     let id = conversationId;
     if (!id) { try { const c = await api<Conversation>('/api/conversations', { method: 'POST', body: JSON.stringify({ title: content.slice(0, 48) }) }); id = c.conversation_id; setConversationId(id); await refresh(); } catch (e) { setError(e instanceof Error ? e.message : 'Falha ao criar conversa'); return; } }
-    setDraft(''); setError(''); setThoughts([]); setTools([]); setMessages(prev => [...prev, { role: 'user', content: displayDraft }, { role: 'assistant', content: '' }]); setBusy(true);
+    setDraft(''); setError(''); setThoughts([]); setTools([]); setMessages(prev => [...prev, { role: 'user', content: displayDraft, profile: modelProfile, style: responseStyle }, { role: 'assistant', content: '', profile: modelProfile, style: responseStyle }]); setBusy(true);
     const controller = new AbortController(); aborter.current = controller;
     try {
       const endpoint = mode === 'agent' ? 'agent-stream' : 'stream';
-      const response = await fetch(`/api/conversations/${id}/${endpoint}`, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', 'X-User-Id': 'usr-eng-01' }, body: JSON.stringify({ content, mode }) });
+      const response = await fetch(`/api/conversations/${id}/${endpoint}`, { method: 'POST', signal: controller.signal, headers: { 'Content-Type': 'application/json', 'X-User-Id': 'usr-eng-01' }, body: JSON.stringify({ content, mode, model_profile: modelProfile, response_style: responseStyle }) });
       if (!response.ok || !response.body) throw new Error(`Falha no stream (${response.status})`);
       const reader = response.body.getReader(), decoder = new TextDecoder(); let buffer = '';
       while (true) {
@@ -98,8 +131,8 @@ export default function VeronicaApp() {
   }
 
   function appendAssistant(delta: string) { if (!delta) return; setMessages(prev => prev.map((m, i) => i === prev.length - 1 ? { ...m, content: m.content + delta } : m)); }
-  if (view === 'admin') return <Suspense fallback={<div className="admin-loading">Abrindo administração…</div>}><Admin onBack={() => setView('work')}/></Suspense>;
-  return <div className="shell">
+  if (view === 'admin') return <Suspense fallback={<div className="admin-loading">Abrindo administração…</div>}><Admin onBack={() => setView('work')} onToggleTheme={() => setTheme(current => current === 'light' ? 'dark' : 'light')} theme={theme}/></Suspense>;
+  return <div className={`shell ${sidebarOpen ? 'sidebar-open' : ''}`}>
     <aside className="sidebar">
       <div className="brand"><div className="brand-mark"><BrainCircuit size={21}/></div><div><b>VERONICA</b><small>NET NEURAL AI</small></div></div>
       <button className="new-chat" onClick={newConversation}><Plus size={17}/> Nova conversa <Command size={14}/></button>
@@ -107,15 +140,15 @@ export default function VeronicaApp() {
       <button className={`side-link ${view === 'work' ? 'selected' : ''}`} onClick={() => setView('work')}><Network size={16}/> Chat &amp; NetCanvas</button>
       <button className={`side-link ${view === 'observatory' ? 'selected' : ''}`} onClick={() => setView('observatory')}><Activity size={16}/> Neural Observatory</button>
       <button className="side-link" onClick={() => setView('admin')}><Settings2 size={16}/> Administração</button>
-      <button className="side-link" onClick={() => setHistoryOpen(!historyOpen)}><ChevronDown size={15} className={historyOpen ? '' : 'rotated'}/> Conversas <span className="count">{conversations.length}</span></button>
-      {historyOpen && <div className="conversation-list">{conversations.map(c => <button key={c.conversation_id} className={`conversation ${c.conversation_id === conversationId ? 'selected' : ''}`} onClick={() => void selectConversation(c.conversation_id)}>{c.title || 'Conversa sem título'}</button>)}{!conversations.length && <small className="muted pad">Sem conversas recentes</small>}</div>}
+      <button className="side-link history-toggle" onClick={() => setHistoryOpen(!historyOpen)} aria-expanded={historyOpen}><ChevronDown size={15} className={historyOpen ? '' : 'rotated'}/> Conversas <span className="count">{conversations.length}</span></button>
+      {historyOpen && <div className="conversation-list">{conversations.map(c => <div key={c.conversation_id} className={`conversation-row ${c.conversation_id === conversationId ? 'selected' : ''}`}><button className="conversation" title={c.title || 'Conversa sem título'} onClick={() => void selectConversation(c.conversation_id)}>{c.title || 'Conversa sem título'}</button><button className="delete-conversation" title="Excluir conversa" aria-label={`Excluir conversa ${c.title || ''}`} onClick={event => void deleteConversation(event, c)}><Trash2 size={14}/></button></div>)}{!conversations.length && <small className="muted pad">Sem conversas recentes</small>}</div>}
       <div className="side-label">Ativos rápidos</div><div className="device-list">{devices.slice(0, 5).map(d => <button key={d.device_id} className="device" onClick={() => setDraft(v => `${v}${v ? ' ' : ''}@${d.device_id} `)}><span className="online-dot"/><span>{d.device_id}<small>{d.vendor} · {d.management_ip}</small></span></button>)}</div>
       <div className="side-label">Artefatos</div><div className="device-list">{workspaceArtifacts.map(({ artifact: item }) => <button key={`${item.id}-${item.version}`} className="device artifact-link" onClick={() => void openStoredArtifact(item.id, item.version)}><FileText size={14}/><span>{item.type}<small>v{item.version} · {item.id}</small></span></button>)}{!workspaceArtifacts.length && <small className="muted pad">Nenhum artefato salvo</small>}</div>
-      <div className="sidebar-bottom"><ShieldCheck size={16}/><span>Safety Control ativo<small>Alterações exigem aprovação humana</small></span></div>
+      <div className="sidebar-bottom"><ShieldCheck size={16}/><span>Safety Control ativo<small>Alterações exigem aprovação humana</small></span><button className="sidebar-theme" onClick={() => setTheme(current => current === 'light' ? 'dark' : 'light')} aria-label={`Ativar tema ${theme === 'light' ? 'escuro' : 'claro'}`} title={`Tema ${theme === 'light' ? 'escuro' : 'claro'}`}>{theme === 'light' ? <Moon size={15}/> : <Sun size={15}/>}</button></div>
     </aside>
     {view === 'observatory' ? <Observatory/> : <>
-      <main className="main"><header className="topbar"><div><span className="status-dot"/> Veronica Transformer <span className="version">LOCAL · {mode === 'agent' ? 'AGENT' : 'CHAT'}</span></div><div className="top-actions"><button className={mode === 'chat' ? 'mode active' : 'mode'} onClick={() => setMode('chat')}><Bot size={15}/> Chat</button><button className={mode === 'agent' ? 'mode active' : 'mode'} onClick={() => setMode('agent')}><Wrench size={15}/> Agent</button><span className="secure"><ShieldCheck size={14}/> Ambiente seguro</span></div></header>
-        <section className="chat-scroll">{messages.length === 0 ? <div className="welcome"><div className="welcome-icon"><BrainCircuit size={30}/></div><p className="eyebrow">CHAT · AGENT · WORK</p><h1>Como posso ajudar na sua rede?</h1><p>Investigue incidentes, consulte documentação ou prepare mudanças seguras com a Veronica.</p><div className="suggestions"><button onClick={() => setDraft('/diagnostico Investigue instabilidade de BGP')}> <Activity size={17}/>Diagnosticar incidente<small>/diagnostico</small></button><button onClick={() => setDraft('/simular Verifique impacto da mudança')}> <GitBranch size={17}/>Simular impacto<small>/simular</small></button><button onClick={() => setDraft('/mudanca Planeje alteração de configuração')}> <ClipboardList size={17}/>Planejar mudança<small>/mudanca</small></button></div></div> : <div className="messages">{messages.map((m, i) => <article key={i} className={`message ${m.role}`}><div className="message-avatar">{m.role === 'user' ? 'A' : <BrainCircuit size={18}/>}</div><div className="message-body"><div className="message-author">{m.role === 'user' ? 'Você' : 'Veronica'}{m.payload && <span className="epistemic fact">Resposta técnica</span>}</div><div className="message-text">{m.content || (busy && i === messages.length - 1 ? <span className="typing">Analisando contexto seguro…</span> : '')}</div>{m.payload && <Payload payload={m.payload}/>}</div></article>)}
+      <main className="main"><header className="topbar"><div><button className="mobile-menu" onClick={() => setSidebarOpen(open => !open)} aria-label={sidebarOpen ? 'Fechar menu lateral' : 'Abrir menu lateral'}><Menu size={17}/></button><span className="status-dot"/> Veronica Transformer <span className="version">LOCAL · {mode === 'agent' ? 'AGENT' : 'CHAT'}</span></div><div className="top-actions"><label className="preference-control"><span>Modelo</span><select aria-label="Modelo Veronica" title="Perfil local: rápido, equilibrado ou resposta ampliada" disabled={busy} value={modelProfile} onChange={event => setModelProfile(event.target.value as ModelProfile)}><option value="vrn-fast">VRN-fast</option><option value="vrn-pro">VRN-pro</option><option value="vrn-ultra">VRN-ultra</option></select></label><label className="preference-control response-control"><span>Resposta</span><select aria-label="Estilo da resposta" title="Escolha como a Veronica apresenta a resposta" disabled={busy} value={responseStyle} onChange={event => setResponseStyle(event.target.value as ResponseStyle)}><option value="technical">Técnica</option><option value="natural">Natural</option><option value="mixed">Mista</option><option value="engineer">Engenheira</option></select></label><button className={mode === 'chat' ? 'mode active' : 'mode'} onClick={() => setMode('chat')}><Bot size={15}/> Chat</button><button className={mode === 'agent' ? 'mode active' : 'mode'} onClick={() => setMode('agent')}><Wrench size={15}/> Agent</button><button className="theme-toggle" onClick={() => setTheme(current => current === 'light' ? 'dark' : 'light')} aria-label={`Ativar tema ${theme === 'light' ? 'escuro' : 'claro'}`} title={`Tema ${theme === 'light' ? 'escuro' : 'claro'}`}>{theme === 'light' ? <Moon size={16}/> : <Sun size={16}/>}<span>{theme === 'light' ? 'Escuro' : 'Claro'}</span></button><span className="secure"><ShieldCheck size={14}/> Ambiente seguro</span></div></header>
+        <section className="chat-scroll">{messages.length === 0 ? <div className="welcome"><div className="welcome-icon"><BrainCircuit size={30}/></div><p className="eyebrow">CHAT · AGENT · WORK</p><h1>Como posso ajudar na sua rede?</h1><p>Investigue incidentes, consulte documentação ou prepare mudanças seguras com a Veronica.</p><div className="suggestions"><button onClick={() => setDraft('/diagnostico Investigue instabilidade de BGP')}> <Activity size={17}/>Diagnosticar incidente<small>/diagnostico</small></button><button onClick={() => setDraft('/simular Verifique impacto da mudança')}> <GitBranch size={17}/>Simular impacto<small>/simular</small></button><button onClick={() => setDraft('/mudanca Planeje alteração de configuração')}> <ClipboardList size={17}/>Planejar mudança<small>/mudanca</small></button></div></div> : <div className="messages">{messages.map((m, i) => <article key={i} className={`message ${m.role}`}><div className="message-avatar">{m.role === 'user' ? 'A' : <BrainCircuit size={18}/>}</div><div className="message-body"><div className="message-author">{m.role === 'user' ? 'Você' : 'Veronica'}{m.role === 'assistant' && m.payload && <span className="epistemic fact">Resposta técnica</span>}{m.profile && <span className={`message-profile ${m.profile}`}>{m.profile.toUpperCase()}</span>}{m.style && <span className="message-style">{({ technical: 'Técnica', natural: 'Natural', mixed: 'Mista', engineer: 'Engenheira' } as Record<ResponseStyle, string>)[m.style]}</span>}</div><div className="message-text">{m.content || (busy && i === messages.length - 1 ? <span className="typing">Analisando contexto seguro…</span> : '')}</div>{m.role === 'assistant' && m.payload && <Payload payload={m.payload}/>}</div></article>)}
           {(thoughts.length > 0 || tools.length > 0) && <details className="thinking" open><summary><BrainCircuit size={16}/> Raciocínio e ferramentas <span>{tools.length} ações</span></summary>{thoughts.map((t,i)=><p key={`t${i}`} className="thought">{t}</p>)}{tools.map((t,i)=><p key={`a${i}`} className="tool-event"><Check size={13}/>{t}</p>)}</details>}
         </div>}</section>
         <div className="composer-wrap"><div className="quick-commands"><button onClick={() => setDraft('/diagnostico ')}> /diagnostico</button><button onClick={() => setDraft('/mudanca ')}> /mudanca</button><button onClick={() => setDraft('/simular ')}> /simular</button><span>@equipamento · @documento</span></div><div className="composer"><textarea value={draft} onChange={e => setDraft(e.target.value)} onKeyDown={e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); void send(); } }} placeholder="Pergunte sobre sua rede ou cole saídas de comandos…" rows={Math.min(5, Math.max(1, logLines > 14 ? 1 : logLines))}/><div className="composer-footer"><span>{logLines > 14 ? <><FileText size={13}/> [Log: {logLines} linhas] · </> : null}A Veronica consulta dados em modo leitura até receber aprovação.</span><button className="send-button" onClick={() => busy ? aborter.current?.abort() : void send()} disabled={!busy && !draft.trim()}>{busy ? <Square size={15} fill="currentColor"/> : <ArrowUp size={18}/>}</button></div></div><p className="disclaimer">A IA pode cometer erros. Mudanças em rede passam pelo fluxo de aprovação.</p></div>

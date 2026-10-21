@@ -10,7 +10,7 @@ import asyncio
 from dataclasses import asdict
 import json
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Literal, Optional
 
 from fastapi import Body, FastAPI, Header, HTTPException, Request, WebSocket, WebSocketDisconnect
 from fastapi.middleware.cors import CORSMiddleware
@@ -40,6 +40,8 @@ class SendMessageRequest(BaseModel):
     modality: str = Field(default="TEXT")
     target_devices: Optional[List[str]] = None
     mode: Optional[str] = Field(default="chat")
+    model_profile: Literal["vrn-fast", "vrn-pro", "vrn-ultra"] = "vrn-pro"
+    response_style: Literal["technical", "natural", "mixed", "engineer"] = "technical"
     image_data: Optional[str] = Field(default=None)
 
 
@@ -344,6 +346,8 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                     modality=req.modality,
                     target_devices=req.target_devices,
                     mode=req.mode or "chat",
+                    model_profile=req.model_profile,
+                    response_style=req.response_style,
                 ):
                     if await request.is_disconnected():
                         hub.chat_service.cancel_generation(conversation_id)
@@ -380,12 +384,16 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                     hub.conversation_service.append_message(
                         conversation_id=conversation_id, user_id=x_user_id,
                         role="user", content=req.content, modality=req.modality,
+                        structured_payload={"model_profile": req.model_profile,
+                                            "response_style": req.response_style},
                     )
                     answer_chunks = []
                     async for typed_event in orchestrator.run(
                         req.content, session_id=conversation_id,
                         context={"user_id": x_user_id, "modality": req.modality,
-                                 "target_devices": req.target_devices},
+                                 "target_devices": req.target_devices,
+                                 "model_profile": req.model_profile,
+                                 "response_style": req.response_style},
                     ):
                         if await request.is_disconnected():
                             hub.chat_service.cancel_generation(conversation_id)
@@ -404,13 +412,15 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                         hub.conversation_service.append_message(
                             conversation_id=conversation_id, user_id=x_user_id,
                             role="assistant", content="".join(answer_chunks),
-                            modality="TEXT", structured_payload={"agent_stream": True},
+                            modality="TEXT", structured_payload={"agent_stream": True,
+                                "model_profile": req.model_profile, "response_style": req.response_style},
                         )
                     return
                 for item in hub.chat_service.stream_message(
                     conversation_id=conversation_id, user_id=x_user_id,
                     message_text=req.content, modality=req.modality,
                     target_devices=req.target_devices, mode=req.mode or "agent",
+                    model_profile=req.model_profile, response_style=req.response_style,
                 ):
                     if await request.is_disconnected():
                         hub.chat_service.cancel_generation(conversation_id)

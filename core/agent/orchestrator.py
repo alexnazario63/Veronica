@@ -65,6 +65,14 @@ class ReActOrchestrator:
         safe_user = sanitize_untrusted_text(user_message, source="user_message").text
         history.append({"role": "user", "content": safe_user})
         evidence: list[dict[str, Any]] = []
+        if context:
+            model_profile = context.get("model_profile")
+            response_style = context.get("response_style")
+            if model_profile in {"vrn-fast", "vrn-pro", "vrn-ultra"} or response_style in {"technical", "natural", "mixed", "engineer"}:
+                evidence.append({"response_preferences": {
+                    "model_profile": model_profile if model_profile in {"vrn-fast", "vrn-pro", "vrn-ultra"} else "vrn-pro",
+                    "response_style": response_style if response_style in {"technical", "natural", "mixed", "engineer"} else "technical",
+                }})
         if self.model_step is None:
             yield MessageDelta(delta="No model step is configured; tools remain available through the orchestrator API.")
             return

@@ -802,7 +802,12 @@ class ChatService:
         target_devices: Optional[List[str]] = None,
         mode: str = "chat",
         image_data: Optional[str] = None,
+        model_profile: str = "vrn-pro",
+        response_style: str = "technical",
     ) -> Dict[str, Any]:
+        model_profile = model_profile if model_profile in {"vrn-fast", "vrn-pro", "vrn-ultra"} else "vrn-pro"
+        response_style = response_style if response_style in {"technical", "natural", "mixed", "engineer"} else "technical"
+        profile_tokens = {"vrn-fast": 16, "vrn-pro": 32, "vrn-ultra": 64}
         self._cancel_flags[conversation_id] = False
 
         if image_data:
@@ -820,7 +825,7 @@ class ChatService:
                 op_mode = "work"
 
         # Registra mensagem do usuário na sessão (com anexo de imagem se houver)
-        user_payload: Dict[str, Any] = {}
+        user_payload: Dict[str, Any] = {"model_profile": model_profile, "response_style": response_style}
         if image_data:
             user_payload["attached_image"] = True
             user_payload["image_data"] = image_data
@@ -866,6 +871,46 @@ class ChatService:
         low = message_text.lower().strip()
 
         def _finalize_and_record_memory(content_md: str, payload: Dict[str, Any]) -> Dict[str, Any]:
+            spoken_summary = str(payload.get("spoken_summary", "")).strip()
+            if model_profile == "vrn-fast":
+                plain_intro = re.split(r"```", content_md, maxsplit=1)[0]
+                compact = spoken_summary or re.split(r"(?<=[.!?])\s+", re.sub(r"(?m)^#{1,6}\s*|\*\*", "", plain_intro), maxsplit=1)[0]
+                content_md = compact[:520].rstrip()
+            elif model_profile == "vrn-ultra":
+                details: List[str] = []
+                claims = payload.get("retrieved_claims", [])
+                if isinstance(claims, list):
+                    details.extend(f"- {str(claim)[:500]}" for claim in claims[:6] if claim)
+                epistemic = payload.get("epistemic_breakdown", {})
+                if isinstance(epistemic, dict):
+                    for field, label in (("verified_facts", "Fatos verificados"), ("technical_inferences", "Inferências técnicas"), ("hypotheses", "Hipóteses")):
+                        items = epistemic.get(field, [])
+                        if isinstance(items, list) and items:
+                            details.append(f"**{label}:** " + "; ".join(str(item)[:300] for item in items[:4]))
+                limits = payload.get("limitations_and_unknowns", [])
+                if isinstance(limits, list) and limits:
+                    details.append("**Limitações:** " + "; ".join(str(item)[:300] for item in limits[:4]))
+                sources = payload.get("technical_sources", [])
+                if isinstance(sources, list) and sources:
+                    details.append("**Fontes consultadas:** " + "; ".join(str(source.get("title") or source.get("source_uri") or "Fonte") for source in sources[:5] if isinstance(source, dict)))
+                if details:
+                    content_md = f"{content_md}\n\n### Análise ampliada\n\n" + "\n\n".join(details)
+
+            if response_style == "natural":
+                blocks = re.split(r"(```[\s\S]*?```)", content_md)
+                content_md = "".join(
+                    block if index % 2 else re.sub(r"\*\*(.*?)\*\*", r"\1", re.sub(r"(?m)^#{1,6}\s*", "", block))
+                    for index, block in enumerate(blocks)
+                )
+            elif response_style == "mixed":
+                summary = spoken_summary or re.split(r"(?<=[.!?])\s+", content_md, maxsplit=1)[0]
+                if summary and not content_md.startswith(f"**Em resumo:** {summary}"):
+                    content_md = f"**Em resumo:** {summary}" if content_md.strip() == summary else f"**Em resumo:** {summary}\n\n**Detalhes:**\n\n{content_md}"
+            elif response_style == "engineer":
+                conclusion = f"**Conclusão:** {spoken_summary}\n\n" if spoken_summary and content_md.strip() != spoken_summary else ""
+                content_md = f"### Resposta de engenharia\n\n{conclusion}**Análise e evidências:**\n\n{content_md}"
+            payload["model_profile"] = model_profile
+            payload["response_style"] = response_style
             if dev and dev.memory:
                 try:
                     stop = {"qual", "quais", "como", "quando", "onde", "para", "sobre", "com", "uma", "the", "what", "with", "from"}
@@ -1715,7 +1760,7 @@ class ChatService:
 
         neural_gen = self.generator.generate_text(
             prompt=f"Pergunta: {message_text}",
-            gen_cfg=GenerationConfig(max_new_tokens=32, greedy=True),
+            gen_cfg=GenerationConfig(max_new_tokens=profile_tokens[model_profile], greedy=True),
             should_cancel=lambda: self._cancel_flags.get(conversation_id, False),
         )
 
@@ -1875,6 +1920,8 @@ class ChatService:
         modality: str = "TEXT",
         target_devices: Optional[List[str]] = None,
         mode: str = "chat",
+        model_profile: str = "vrn-pro",
+        response_style: str = "technical",
     ) -> Iterator[Dict[str, Any]]:
         """
         Gera e transmite progressivamente a resposta token a token (SSE),
@@ -1887,11 +1934,13 @@ class ChatService:
             modality=modality,
             target_devices=target_devices,
             mode=mode,
+            model_profile=model_profile,
+            response_style=response_style,
         )
         emitted = 0
         for item in self.generator.stream_generate(
             prompt=f"Pergunta: {message_text}",
-            gen_cfg=GenerationConfig(max_new_tokens=16, greedy=True),
+            gen_cfg=GenerationConfig(max_new_tokens={"vrn-fast": 16, "vrn-pro": 32, "vrn-ultra": 64}.get(model_profile, 32), greedy=True),
             should_cancel=lambda: self._cancel_flags.get(conversation_id, False),
         ):
             emitted += 1
@@ -2579,6 +2628,23 @@ class VeronicaPlatformHub:
 
         async def model_step(user_message: str, history: List[Dict[str, Any]],
                              evidence: List[Dict[str, Any]]) -> Dict[str, Any]:
+            preferences = next((item.get("response_preferences", {}) for item in evidence
+                                if isinstance(item, dict) and isinstance(item.get("response_preferences"), dict)), {})
+            technical_evidence = [item for item in evidence if not (isinstance(item, dict) and "response_preferences" in item)]
+            selected_profile = preferences.get("model_profile", "vrn-pro")
+            selected_style = preferences.get("response_style", "technical")
+            token_budget = {"vrn-fast": 64, "vrn-pro": 128, "vrn-ultra": 256}.get(selected_profile, 128)
+            style_guidance = {
+                "technical": "Use linguagem tecnica precisa, defina termos quando necessario e diferencie fatos de inferencias.",
+                "natural": "Converse de forma clara e natural, sem cabecalhos ou jargao desnecessario.",
+                "mixed": "Comece com um resumo claro e depois apresente os detalhes tecnicos relevantes.",
+                "engineer": "Organize como resposta de engenharia: contexto, analise, passos verificaveis, riscos e validacao; nao invente comandos nem resultados.",
+            }.get(selected_style, "Responda com clareza e precisao.")
+            profile_guidance = {
+                "vrn-fast": "Priorize uma resposta curta com a conclusao e a proxima acao essencial.",
+                "vrn-pro": "Equilibre concisao e explicacao suficiente para justificar a conclusao.",
+                "vrn-ultra": "Explore as evidencias disponiveis e explicite limites e incertezas sem inventar informacao.",
+            }.get(selected_profile, "Equilibre concisao e detalhe.")
             tool_specs = [
                 {"name": "search_knowledge", "arguments": {"query": "string", "top_k": "integer?", "vendor_filter": "string?"}},
                 {"name": "diagnose", "arguments": {"problem_description": "string", "target_devices": "string[]?"}},
@@ -2588,9 +2654,10 @@ class VeronicaPlatformHub:
                 "[SYSTEM] Responda somente com JSON objeto: {\"thought\":str,\"tool_calls\":[{\"name\":str,\"arguments\":object}],\"answer\":str}. "
                 "Use apenas ferramentas listadas; prefira consulta ou diagnóstico somente leitura. "
                 "Mudanças só podem ser simuladas. Nunca solicite nem declare aprovada uma execução. "
+                f"Perfil selecionado: {selected_profile}. {profile_guidance} Estilo de resposta: {style_guidance} "
                 f"Ferramentas: {json.dumps(tool_specs, ensure_ascii=False)}\n"
                 f"Histórico recente: {json.dumps(history[-4:], ensure_ascii=False, default=str)}\n"
-                f"Evidências: {json.dumps(evidence[-4:], ensure_ascii=False, default=str)}\n"
+                f"Evidências: {json.dumps(technical_evidence[-4:], ensure_ascii=False, default=str)}\n"
                 f"Pedido: {user_message}\n[ASSISTANT][TOOL_CALL]"
             )
             tool_schema = {
@@ -2617,7 +2684,7 @@ class VeronicaPlatformHub:
             generated = await asyncio.to_thread(
                 self.generator.generate_text,
                 instruction,
-                GenerationConfig(max_new_tokens=64, temperature=0.1, greedy=True),
+                GenerationConfig(max_new_tokens=token_budget, temperature=0.1, greedy=True),
                 tool_schema=tool_schema,
             )
             output = str(generated.get("text", "")).strip()
