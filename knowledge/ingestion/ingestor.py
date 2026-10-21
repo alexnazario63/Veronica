@@ -945,13 +945,10 @@ def search_live_web_and_rfc(
     max_results: int = 5,
     timeout: float = 6.0,
 ) -> List[Dict[str, Any]]:
-    """
-    Busca dinâmica e analítica em tempo real na web e portais técnicos oficiais:
-    1. Formulação de query técnica (incluindo expansão para termos IETF RFC).
-    2. DuckDuckGo HTML Lite (extrai títulos, snippets e URLs reais desempacotadas).
-    3. Extração direta de seção normativa IETF RFC (.txt) quando uma RFC relevante é identificada.
-    4. Wikipedia API (pesquisa enciclopédica estruturada em português e inglês).
-    5. Resiliência: caso offline ou timeout, retorna lista vazia sem travar a aplicação.
+    """Search Google first, then include Portuguese and English Wikipedia evidence.
+
+    Topic-specific queries are retained for discovery; fetched source pages are
+    sanitized and ranked separately by relevance and source authority.
     """
     import urllib.request
     import urllib.parse
@@ -964,16 +961,18 @@ def search_live_web_and_rfc(
 
     search_queries = _build_open_domain_search_queries(clean_q)
 
-    # 1. DuckDuckGo HTML Lite com queries analíticas
-    per_query_limit = max(2, max_results // max(1, len(search_queries)))
+    # Google is the primary discovery engine. Reserve two slots so Wikipedia is
+    # included in the evidence set even when Google returns many results.
+    google_limit = max(1, max_results - 2)
+    per_query_limit = max(1, google_limit // max(1, len(search_queries)))
     for sq in search_queries:
-        if len(results) >= max_results:
+        if len(results) >= google_limit:
             break
         query_added = 0
         try:
-            ddg_url = "https://html.duckduckgo.com/html/?q=" + urllib.parse.quote(sq)
+            google_url = "https://www.google.com/search?q=" + urllib.parse.quote(sq) + "&num=10"
             req = urllib.request.Request(
-                ddg_url,
+                google_url,
                 headers={
                     "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
                     "Accept-Language": "pt-BR,pt;q=0.9,en-US;q=0.8,en;q=0.7",
@@ -982,51 +981,32 @@ def search_live_web_and_rfc(
             )
             with urllib.request.urlopen(req, timeout=min(timeout, 4.5)) as resp:
                 body = resp.read().decode("utf-8", errors="ignore")
-                snippets = re.findall(
-                    r'<a[^>]*class="result__snippet[^"]*"[^>]*>(.*?)</a>',
-                    body,
-                    re.DOTALL,
+                matches = re.findall(
+                    r'<a\b[^>]*href="([^"]+)"[^>]*>.*?<h3\b[^>]*>(.*?)</h3>.*?</a>',
+                    body, re.IGNORECASE | re.DOTALL,
                 )
-                urls = re.findall(
-                    r'<a[^>]*class="result__url[^"]*"[^>]*href="([^"]+)"',
-                    body,
-                    re.DOTALL,
-                )
-                titles = re.findall(
-                    r'<h2[^>]*class="result__title"[^>]*>.*?<a[^>]*>(.*?)</a>',
-                    body,
-                    re.DOTALL,
-                )
-
-                for i, snip in enumerate(snippets[:max_results]):
-                    raw_snip = html.unescape(re.sub(r"<[^>]+>", "", snip).strip())
-                    raw_url = urls[i].strip() if i < len(urls) else ""
-                    clean_title = (
-                        html.unescape(re.sub(r"<[^>]+>", "", titles[i]).strip())
-                        if i < len(titles)
-                        else ""
-                    )
-
-                    real_url = raw_url
-                    if "uddg=" in raw_url:
-                        match_url = re.search(r"uddg=([^&]+)", raw_url)
-                        if match_url:
-                            real_url = urllib.parse.unquote(match_url.group(1))
-                    elif raw_url.startswith("//"):
-                        real_url = "https:" + raw_url
-
-                    if raw_snip and len(raw_snip) > 15 and real_url not in seen_urls:
+                for raw_url, raw_title in matches:
+                    real_url = html.unescape(raw_url).strip()
+                    if real_url.startswith("/url?"):
+                        params = urllib.parse.parse_qs(urllib.parse.urlparse(real_url).query)
+                        real_url = (params.get("q") or params.get("url") or [""])[0]
+                    elif real_url.startswith("//"):
+                        real_url = "https:" + real_url
+                    parsed = urllib.parse.urlparse(real_url)
+                    if parsed.scheme not in {"https", "http"} or not parsed.hostname:
+                        continue
+                    clean_title = html.unescape(re.sub(r"<[^>]+>", "", raw_title).strip())
+                    if len(clean_title) > 8 and real_url not in seen_urls:
                         seen_urls.add(real_url)
-                        results.append(
-                            {
-                                "title": clean_title or f"Documentação Técnica: {sq}",
-                                "snippet": raw_snip,
-                                "url": real_url or "https://datatracker.ietf.org",
-                                "source": "Web Search (DuckDuckGo)",
-                            }
-                        )
+                        results.append({
+                            "title": clean_title,
+                            "snippet": "",
+                            "url": real_url,
+                            "source": "Google Search",
+                            "search_provider": "google",
+                        })
                         query_added += 1
-                        if len(results) >= max_results or query_added >= per_query_limit:
+                        if len(results) >= google_limit or query_added >= per_query_limit:
                             break
         except Exception:
             pass
@@ -1056,6 +1036,7 @@ def search_live_web_and_rfc(
                                     "snippet": clean_snip,
                                     "url": w_url,
                                     "source": f"Wikipedia ({lang.upper()})",
+                                    "search_provider": "wikipedia",
                                 }
                             )
                             if len(results) >= max_results:

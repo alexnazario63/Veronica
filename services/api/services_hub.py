@@ -2547,9 +2547,13 @@ class VeronicaPlatformHub:
             result.update({
                 "title": title, "snippet": snippet, "content": snippet, "url": url,
                 "full_page": False, "domain": domain,
+                "search_provider": str(result.get("search_provider", "google")),
                 "source_type": trust["source_type"], "is_primary_source": trust["is_primary_source"],
                 "authority_score": trust["authority_score"], "relevance": round(overlap, 3),
-                "retrieval_score": round(overlap * 0.72 + float(trust["authority_score"]) * 0.28, 4),
+                "retrieval_score": round(
+                    overlap * 0.72 + float(trust["authority_score"]) * 0.28
+                    + (0.08 if result.get("search_provider") == "wikipedia" else 0.0), 4
+                ),
             })
             result["_focus_match"] = _matches_focus(title, focus_terms)
             normalized.append(result)
@@ -2559,7 +2563,12 @@ class VeronicaPlatformHub:
             doc.source_uri: doc for doc in self.rag.documents.values()
             if doc.domain == "general.open_web" and doc.source_uri
         }
-        for item in normalized[:2]:
+        fetch_candidates = []
+        for provider in ("google", "wikipedia"):
+            candidate = next((item for item in normalized if item.get("search_provider") == provider), None)
+            if candidate:
+                fetch_candidates.append(candidate)
+        for item in fetch_candidates:
             cached = cached_by_url.get(item["url"])
             if cached and cached.content and len(cached.content) > len(item["snippet"]) + 250:
                 try:
