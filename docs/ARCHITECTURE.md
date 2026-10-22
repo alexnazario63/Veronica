@@ -1,123 +1,192 @@
 # Arquitetura Técnica — VERONICA (Net Neural AI)
 
-## 1. Visão Geral
+## 1. Visão Geral e Princípios Fundamentais
 
-**Veronica** é uma plataforma nativa de Inteligência Artificial especializada em engenharia, administração, operação, diagnóstico e automação segura de redes de computadores. Diferente de soluções baseadas em wrappers de APIs comerciais ou pesos pré-treinados de terceiros, a Veronica possui:
+A **Veronica** é uma plataforma de Inteligência Artificial nativa desenvolvida especificamente para engenharia, operação, diagnóstico estruturado e automação determinística de redes de computadores multi-vendor.
 
-1. **Núcleo Neural Próprio (`core/`)**: Motor de álgebra tensorial com diferenciação automática (Autograd) construído do zero sobre NumPy, camadas parametrizadas, otimizadores (`SGD`, `AdamW`), tokenizador técnico especializado em redes e arquitetura **VeronicaTransformer** treinada do zero (com RoPE/Positional Encoding, Multi-Head Causal Self-Attention, KV-Cache, RMSNorm/LayerNorm e Feed-Forward GELU).
-2. **Sistema Híbrido de Conhecimento (`knowledge/`)**: Separação estrita entre **conhecimento paramétrico** (pesos aprendidos pelo modelo) e **conhecimento documental** (base indexada com RAG lexical BM25 + embeddings próprios da Veronica, preservando 12 campos obrigatórios de metadados e detecção de conflitos/obsolescência).
-3. **Engenharia e Diagnóstico de Redes (`networking/`)**: Adaptadores padronizados por fabricante/sistema operacional/versão (Huawei VRP, Cisco IOS-XE/IOS-XR/NX-OS, Juniper Junos, MikroTik RouterOS, Nokia SR OS, Arista EOS, Fortinet FortiOS, etc.), motor de topologia e motor de investigação diagnóstica em 11 etapas.
-4. **Motor Determinístico de Configuração Segura (`safety/`)**: Controlador de mudanças 100% independente do modelo neural, implementando o fluxo obrigatório de **10 etapas** (Descoberta, Baseline, Análise de Impacto, Planejamento, Simulação, Aprovação Humana Explícita, Execução Controlada, Pós-validação, Rollback e Auditoria Imutável em cadeia SHA-256), RBAC e Cofre de Credenciais.
-5. **Interface Web Multimodal & Neural Observatory (`services/api/` e `frontend/`)**: Chat técnico com distinção visual entre fatos documentados e inferências, conversação por voz com consentimento explícito e trava de segurança operacional, e o **Neural Observatory (Neural Lab)** para inspeção gráfica da arquitetura neural, telemetria real de hardware e treinamento interativo em tempo real.
+O projeto não utiliza invólucros (*wrappers*) de modelos de linguagem de terceiros, modelos pré-treinados comerciais ou pesos opacos de caixa-preta. Toda a inteligência da plataforma é construída sobre:
+1. **Fundação Matemática Nativa**: Diferenciação automática reversa (Autograd sobre NumPy), tensores com grafos computacionais auditáveis e verificação formal por diferenças finitas (`gradcheck`).
+2. **Arquitetura Neural Própria (`VeronicaTransformer`)**: Atenção causal multi-cabeças com KV-Cache e posições codificadas por RoPE ou codificação senoidal.
+3. **Desenvolvimento Cognitivo e Neurogênese Dinâmica**: Evolução ontogenética por estágios, criação de neurônios estruturais mediante surpresa sensorial, memória episódica/semântica e persistência binária de alto desempenho.
+4. **Agente ReAct e Inferência Gramatical Restrita**: Loops de raciocínio estruturados com decodificação vinculada a esquemas formais (`ConstrainedJSONDecoder`).
+5. **Conhecimento Híbrido com Epistemologia Transparente**: RAG híbrido (BM25S + embeddings próprios), preservação de 12 metadados obrigatórios e categorização das respostas em Fatos Comprovados, Inferências Técnicas e Hipóteses.
+6. **Engenharia Multi-Vendor Padronizada**: Adaptadores síncronos e assíncronos cobrindo 16 operações operacionais essenciais para os principais fabricantes de telecomunicações.
+7. **Diagnóstico Estruturado em 11 Etapas**: Mecanismo de isolamento de causa-raiz estritamente em modo de leitura (*read-only*).
+8. **Motor Determinístico de Mudança em 10 Etapas**: Controlador independente do modelo neural, com travas de concorrência, cálculo de raio de impacto (*Blast Radius*), rollback determinístico e auditoria em cadeia criptográfica SHA-256.
 
 ---
 
-## 2. Diagrama de Arquitetura em Camadas
+## 2. Diagrama Macro da Arquitetura do Sistema
 
 ```mermaid
 flowchart TD
-    subgraph GUI["Frontend Web (React + TypeScript)"]
-        Chat["Chat Técnico & Voz Multimodal"]
-        Obs["Neural Observatory (Arquitetura & Métricas)"]
-        Lab["Laboratório de Experimentos & Checkpoints"]
-        NetUI["Inventário, Topologia, Diagnóstico & Mudanças"]
+    subgraph PRESENTATION["Camada de Apresentação & Observabilidade (frontend/)"]
+        ChatUI["Chat Técnico & Interface de Voz"]
+        ObsUI["Neural Observatory (Pesos, Gradientes & Telemetria)"]
+        AdminUI["Admin Cockpit & Visualizador do Grafo de Memória"]
+        WorkUI["Workspace de Artefatos & Diffs Versionados"]
+        NOCUI["NOC Center (Topologia, Diagnóstico & Mudanças)"]
     end
 
-    subgraph API["Camada de Serviços (FastAPI + WebSocket/SSE)"]
-        CS["ChatService & ConversationService"]
-        Speech["SpeechRecognition & SpeechSynthesis"]
-        NTS["NeuralTrainingService & NeuralMetricsService"]
-        AVS["ArchitectureVisualization & ModelRegistry"]
-        NOS["NetworkOperationsService & BenchmarkService"]
+    subgraph API_LAYER["Camada de Serviços & Distribuição (services/api/)"]
+        FastAPI["Motor REST FastAPI (app.py)"]
+        Hub["ServicesHub (Coordenação de 10 Serviços Modulares)"]
+        Streamer["Mecanismo de Streaming (SSE & WebSocket)"]
+        ArtStore["ArtifactStore (SQLite / SQLAlchemy)"]
     end
 
-    subgraph CORE["Núcleo Neural Nativo (core/)"]
-        Tensor["Motor Matemático & Autograd (core/neural)"]
-        Tok["Tokenizador Técnico de Redes (core/tokenizer)"]
-        Trans["VeronicaTransformer (core/transformer)"]
-        Train["Motor de Treinamento & Checkpoints (core/training)"]
-        Inf["Motor de Inferência & KV-Cache (core/inference)"]
+    subgraph COGNITION["Núcleo Cognitivo & Desenvolvimento (core/)"]
+        DevEng["DevelopmentEngine (Estágios Ontogenéticos)"]
+        NeuroEng["NeurogenesisEngine & DynamicNeuron"]
+        MemSys["MemorySystem (Trabalho, Episódica & Grafo Semântico)"]
+        BinMem["BinaryMachineMemoryStore (Indexação Vetorial Ultrarrápida)"]
+        ReAct["ReActOrchestrator & AgentTools"]
+        AutoDaemon["AutonomousCognitiveDaemon (Consolidação em Sono)"]
     end
 
-    subgraph KNOW["Conhecimento Especializado (knowledge/)"]
-        Ing["Ingestão, Extração & Anti-Injection (knowledge/ingestion)"]
-        Ret["RAG Lexical BM25 + Vetorial Nativo (knowledge/retrieval)"]
-        Src["Fontes Oficiais & Matriz de Confiabilidade (knowledge/sources)"]
+    subgraph NEURAL["Motor Matemático & Transformer (core/neural & transformer)"]
+        Autograd["Tensor & Grafo Dinâmico de Gradientes"]
+        Layers["Camadas Parametrizadas & Otimizadores (AdamW / SGD)"]
+        Transformer["VeronicaTransformer & KV-Cache"]
+        JSONDec["ConstrainedJSONDecoder (Gramática e Sintaxe)"]
     end
 
-    subgraph NET["Engenharia de Redes (networking/)"]
-        Vend["Adaptadores Multi-Vendor (networking/vendors)"]
-        Proto["Analisadores de Protocolos (networking/protocols)"]
-        Topo["Grafo de Topologia & Dependências (networking/topology)"]
-        Diag["Motor de Diagnóstico em 11 Etapas (networking/diagnostics)"]
+    subgraph KNOWLEDGE_RAG["Conhecimento Especializado & Epistemologia (knowledge/)"]
+        Sanitizer["SecretScrubber & PromptInjectionGuard"]
+        HybridRAG["RAG Híbrido (BM25S + Vetorial Nativo)"]
+        Catalog["Catálogo de Fontes Oficiais (12 Metadados)"]
     end
 
-    subgraph SAFE["Segurança & Controle Determinístico (safety/)"]
-        Pol["RBAC, Guardrails & Cofre (safety/policies)"]
-        CC["Fluxo de Mudança de 10 Etapas (safety/change_control)"]
-        RB["Motor de Rollback & Auditoria SHA-256 (safety/rollback)"]
+    subgraph NET_DIAG["Engenharia de Redes & Diagnóstico (networking/)"]
+        VendorAdapters["Adaptadores Multi-Vendor (16 Métodos Padronizados)"]
+        AsyncAdapters["Adaptadores Assíncronos (AsyncVendorAdapter)"]
+        ProtoAnalyzers["Analisadores de Protocolos (BGP, OSPF, IS-IS, MPLS, Óptica)"]
+        Topology["Grafo Topológico Multi-Camadas & Blast Radius"]
+        Diag11["Motor de Diagnóstico Estruturado em 11 Etapas"]
     end
 
-    GUI --> API
-    CS --> Inf
-    CS --> Ret
-    CS --> Diag
-    NTS --> Train
-    AVS --> Trans
-    NOS --> CC
-    NOS --> Diag
-    Trans --> Tensor
-    Train --> Trans
-    Inf --> Trans
-    Diag --> Topo
-    Diag --> Ret
-    Diag --> Vend
-    CC --> Pol
-    CC --> RB
-    CC --> Vend
+    subgraph SAFETY_LAYER["Segurança, Controle de Mudança & Auditoria (safety/)"]
+        ChangeCtrl["DeterministicChangeController (10 Etapas Obrigatórias)"]
+        BlastLock["Travas de Concorrência & FSM de Mudança"]
+        RBAC["RBACPolicyManager & CredentialVault"]
+        AuditLog["Trilha Imutável Encadeada por SHA-256"]
+        RollbackOrch["RollbackOrchestrator"]
+    end
+
+    PRESENTATION --> API_LAYER
+    API_LAYER --> COGNITION
+    API_LAYER --> NET_DIAG
+    API_LAYER --> SAFETY_LAYER
+    API_LAYER --> KNOWLEDGE_RAG
+    COGNITION --> NEURAL
+    COGNITION --> KNOWLEDGE_RAG
+    NET_DIAG --> SAFETY_LAYER
+    SAFETY_LAYER --> VendorAdapters
 ```
 
 ---
 
-## 3. Estrutura do Repositório
+## 3. Detalhamento dos Componentes
 
-```text
-veronica/
-├── core/
-│   ├── neural/          # Tensores com Autograd, Neurônios, Camadas, Ativações, Losses, Otimizadores, Gradcheck
-│   ├── tokenizer/       # Tokenizador técnico BPE + preservação de IPv4/IPv6/CIDR/ASN/Interfaces/CLI
-│   ├── transformer/     # Embeddings, RoPE/Positional, Multi-Head Causal Attention, Blocos Transformer
-│   ├── training/        # Loop de treinamento, DataLoader, Clipping, Telemetria, Checkpoints e Experimentos
-│   └── inference/       # Decodificação autoregressiva, KV-Cache, Top-k/Top-p, Controle de cancelamento
-├── knowledge/
-│   ├── ingestion/       # Parsers (MD, TXT, HTML, JSON, XML, Config), Sanitização de Prompt Injection
-│   ├── retrieval/       # Indexador BM25 + Embeddings próprios, Detector de Conflitos e Obsolescência
-│   └── sources/         # Catálogo de fontes oficiais, metadados obrigatórios (12 campos) e corpus inicial
-├── networking/
-│   ├── vendors/         # Interface BaseVendorAdapter (16 métodos) + Huawei, Cisco, Juniper, MikroTik, Nokia, Arista, Fortinet
-│   ├── protocols/       # Regras e máquinas de estado para BGP, OSPF, IS-IS, MPLS, EVPN/VXLAN, STP, LACP, Óptica
-│   ├── topology/        # Descoberta LLDP/CDP/BGP, Grafo de adjacências e Cálculo de raio de impacto (Blast Radius)
-│   └── diagnostics/     # Investigador em 11 etapas combinando Regras + Topologia + RAG + Modelo Neural
-├── safety/
-│   ├── policies/        # RBAC, Cofre de Credenciais (Vault), Sanitizador de Comandos e Políticas Read-Only
-│   ├── change_control/  # Máquina de estados determinística das 10 Etapas Obrigatórias de Mudança
-│   └── rollback/        # Gerenciador de backups, verificação pós-mudança, rollback e Auditoria Imutável SHA-256
-├── services/
-│   └── api/             # Aplicação FastAPI, 10 Serviços modulares, Persistência SQLite/PostgreSQL, Streaming SSE/WS
-├── frontend/            # Aplicação React + TypeScript (Chat, Voz, Neural Observatory, Experimentos, NOC Center)
-├── tests/               # Suíte completa de testes automatizados (matemáticos, neurais, RAG, diagnóstico, segurança, API)
-└── docs/                # Documentação de Arquitetura, Interfaces, Datasets, Métricas, Riscos e Roadmap
-```
+### 3.1 Motor Matemático e Autograd (`core/neural/`)
+Localizado em [core/neural/tensor.py](file:///c:/Users/alexn/Desktop/Veronica/core/neural/tensor.py):
+- Implementa a classe fundamental `Tensor`, que encapsula um array multidimensional em `NumPy` acompanhado de sua closure computacional e gradientes (`grad`).
+- Cada nó do grafo computacional rastreia seus predecessores (`_prev`) e sua função de gradiente analítico local (`_backward`).
+- Backpropagation executado por ordenação topológica estrita, zerando acumulações indevidas com `zero_grad()`.
+- O módulo [gradcheck.py](file:///c:/Users/alexn/Desktop/Veronica/core/neural/gradcheck.py) aplica a equação de diferenças finitas centrais:
+  $$\frac{\partial \mathcal{L}}{\partial x_i} \approx \frac{\mathcal{L}(x + \epsilon e_i) - \mathcal{L}(x - \epsilon e_i)}{2\epsilon}$$
+  garantindo erro relativo $< 10^{-5}$ em todas as primitivas matemáticas.
+
+### 3.2 Arquitetura `VeronicaTransformer` (`core/transformer/`)
+Localizado em [core/transformer/model.py](file:///c:/Users/alexn/Desktop/Veronica/core/transformer/model.py):
+- Suporta codificação posicional senoidal e Rotary Positional Embeddings (`RoPE`).
+- Projeção de atenção causal multi-cabeças (`MultiHeadAttention`) equipada com `PrefixKVCache` para otimização da complexidade temporal de geração de tokens de $\mathcal{O}(N^2)$ para $\mathcal{O}(N)$.
+- Camadas de normalização configuráveis entre `LayerNorm` e `RMSNorm`.
+- Decodificador autoregressivo com suporte a amostragem top-k, top-p (nucleus sampling), temperatura e restrição estruturada de saída via [ConstrainedJSONDecoder](file:///c:/Users/alexn/Desktop/Veronica/core/inference/constrained_json.py).
+
+### 3.3 Desenvolvimento Cognitivo, Neurogênese e Memória (`core/development/`)
+Localizado em [core/development/](file:///c:/Users/alexn/Desktop/Veronica/core/development/):
+- **Evolução Ontogenética (`DevelopmentEngine`)**: Controla as fases de maturação do sistema:
+  - `INFANT`: Aprendizado de átomos fundamentais e sintaxe básica.
+  - `CHILD`: Relações causais simples entre estados de interfaces e rotas.
+  - `ADOLESCENT`: Correlação topológica e análise de adjacências.
+  - `SPECIALIST`: Domínio avançado de BGP, MPLS, engenharia de tráfego e segment routing.
+  - `EXPERT`: Investigação de falhas multivariadas e planejamento de mudanças seguras.
+- **Neurogênese Estrutural (`NeurogenesisEngine`)**:
+  - Instancia `DynamicNeuron` integrados a circuitos dinâmicos (`NeurogenesisCircuit`).
+  - Novos neurônios são gerados quando o sinal de entrada apresenta divergência ou novidade superior ao limiar configurado (`novelty_threshold`), permitindo expansão contínua sem degradação do conhecimento prévio.
+- **Sistema de Memória Multinível (`MemorySystem`)**:
+  - `WorkingMemory`: Janela atencional imediata com capacidade dinâmica.
+  - `EpisodicMemory`: Registro temporal indexado de interações e resoluções de problemas.
+  - `ConceptGraph`: Grafo semântico constituído de nós de conceitos (`ConceptNode`) e relações ponderadas (`ConceptEdge`).
+  - `BinaryMachineMemoryStore`: Formato binário ultra-compacto para busca vetorial e associação semântica de baixíssima latência.
+- **Daemon Cognitivo Autônomo (`AutonomousCognitiveDaemon`)**:
+  - Executa em segundo plano com múltiplos workers simultâneos.
+  - Responsável pela fase de consolidação cognitiva (equivalente ao sono/sonho biológico), reorganizando pesos, realizando poda (*pruning*) de conexões ruidosas e indexando memórias recentes.
+
+### 3.4 Agente ReAct (`core/agent/orchestrator.py`)
+- O `ReActOrchestrator` implementa ciclos deliberativos estruturados:
+  1. **Thought (Pensamento)**: Análise analítica da solicitação ou estado atual.
+  2. **Action (Ação)**: Invocação de uma ferramenta registrada em `AgentTool`.
+  3. **Observation (Observação)**: Captura da saída determinística retornada pela ferramenta.
+  4. **Final Answer (Resposta Final)**: Síntese estruturada das constatações.
+- Todas as ações executadas pelo agente respeitam estritamente as políticas de isolamento de segurança.
+
+### 3.5 Sistema de Conhecimento Híbrido (`knowledge/`)
+- **Separação Epistêmica**: Os pesos neurais do modelo são estritamente isolados da base documental.
+- **Preservação de 12 Metadados Obrigatórios**: Todo trecho indexado no catálogo oficial ([knowledge/sources/catalog.py](file:///c:/Users/alexn/Desktop/Veronica/knowledge/sources/catalog.py)) preserva fabricante, modelo, sistema operacional, versão exata, fonte original, URI, seção/página, datas de publicação e consulta, pontuação de confiabilidade e restrições de aplicabilidade.
+- **Segurança de Entrada**:
+  - `SecretScrubber`: Substituição imediata de senhas, hashes e credenciais por identificadores opacos (`[REDACTED_SECRET]`).
+  - `PromptInjectionGuard`: Varredura determinística contra instruções camufladas em documentações técnicas.
+
+### 3.6 Engenharia Multi-Vendor e Diagnóstico em 11 Etapas (`networking/`)
+- **Contrato de 16 Métodos Padronizados**: Implementado em [networking/vendors/adapters.py](file:///c:/Users/alexn/Desktop/Veronica/networking/vendors/adapters.py) e [networking/vendors/async_adapters.py](file:///c:/Users/alexn/Desktop/Veronica/networking/vendors/async_adapters.py).
+- **Cobertura Homologada**:
+  - Huawei VRP (V8 / V5)
+  - Cisco Systems (IOS-XE, IOS-XR, NX-OS)
+  - Juniper Networks (Junos OS)
+  - MikroTik (RouterOS v6 / v7)
+  - Nokia (SR OS)
+  - Arista Networks (EOS)
+  - Fortinet (FortiOS)
+- **Motor Diagnóstico em 11 Etapas** ([networking/diagnostics/engine.py](file:///c:/Users/alexn/Desktop/Veronica/networking/diagnostics/engine.py)):
+  - Execução 100% somente leitura.
+  - Correlaciona telemetria, topologia e regras de protocolo.
+  - Formulação de hipóteses técnicas com verificação de precedência causal.
+  - Caso os dados coletados sejam insuficientes, o motor declara formalmente incerteza e indica com precisão os comandos adicionais necessários.
+
+### 3.7 Controlador Determinístico de Mudanças em 10 Etapas (`safety/change_control/`)
+- Localizado em [safety/change_control/controller.py](file:///c:/Users/alexn/Desktop/Veronica/safety/change_control/controller.py):
+- Garante total blindagem operacional através das seguintes fases imutáveis:
+  1. *Descoberta*: Validação de fabricante, SO e versão.
+  2. *Baseline*: Cálculo do hash SHA-256 da configuração ativa.
+  3. *Análise de Risco de Lockout*: Verificação de interfaces OOB e imposição de `commit confirmed`.
+  4. *Planejamento e Pré-requisitos*: Verificação de saúde de hardware e dependências.
+  5. *Geração de Candidato e Diff*: Geração de diff unificado estritamente padronizado.
+  6. *Aprovação Humana Formal*: Validação criptográfica do token de aprovação atrelado à janela de manutenção; comandos falados por voz são bloqueados por especificação.
+  7. *Execução com Detecção de Concorrência*: Nova coleta do hash de baseline. Divergências acionam aborto imediato (`CONCURRENT_MODIFICATION_DETECTED`).
+  8. *Pós-validação*: Bateria de checagem imediata de saúde de protocolos e vizinhanças.
+  9. *Rollback Automático*: Caso a pós-validação falhe ou a sessão seja degradada, reversão imediata para o baseline.
+  10. *Auditoria Imutável*: Registro encadeado em SHA-256 no log à prova de adulteração.
+
+### 3.8 Camada de Aplicação, Hub de Serviços e Workspace (`services/api/`)
+- Coordenada por [services/api/services_hub.py](file:///c:/Users/alexn/Desktop/Veronica/services/api/services_hub.py) e [services/api/app.py](file:///c:/Users/alexn/Desktop/Veronica/services/api/app.py).
+- Conexão em tempo real via Server-Sent Events (SSE) e WebSockets para métricas do Neural Observatory e telemetria de hardware (CPU, RAM, GPU, VRAM).
+- [services/api/workspace/store.py](file:///c:/Users/alexn/Desktop/Veronica/services/api/workspace/store.py): Gerenciamento de artefatos com histórico formal de versões e controle de modificações no workspace.
 
 ---
 
-## 4. Decisões Arquiteturais Fundamentais
+## 4. Decisões Arquiteturais Fundamentais (ADRs)
 
-1. **Autograd explícito e auditável sobre NumPy**: Cada operação tensorial (`matmul`, `add`, `relu`, `gelu`, `softmax`, `layernorm`, `rmsnorm`, `cross_entropy`) possui implementação matemática explícita da derivada analítica no passo `backward()`, validada por diferenças finitas centrais:
-   $$\frac{\partial \mathcal{L}}{\partial x_i} \approx \frac{\mathcal{L}(x + \epsilon e_i) - \mathcal{L}(x - \epsilon e_i)}{2\epsilon}$$
-2. **Isolamento entre Conhecimento Documental e Pesos Neurais**: O upload ou ingestão de um documento atualiza imediatamente o índice documental (com rastreabilidade de fonte, versão e página), mas **jamais altera automaticamente os pesos do modelo** nem políticas de segurança.
-3. **Separação entre Sugestão Neural e Execução em Rede**: O modelo neural Veronica atua como copiloto cognitivo e gerador de planos/hipóteses. Toda interação com equipamentos passa obrigatoriamente pelo controlador determinístico (`ChangeControlEngine`), que é somente leitura por padrão e exige aprovação humana vinculada a hash de plano e janela de manutenção para qualquer alteração.
-4. **Epistemologia Transparente**: Toda resposta técnica da Veronica classifica suas afirmações em:
-   - **Fato Comprovado (`VERIFIED_FACT`)**: Extraído diretamente de documentação oficial indexada ou saída real de coleta read-only.
-   - **Inferência Técnica (`TECHNICAL_INFERENCE`)**: Dedução lógica baseada em estado operacional + regras de protocolo.
-   - **Hipótese (`HYPOTHESIS`)**: Possibilidade que requer teste seguro adicional para confirmação.
+1. **ADR-01: Autograd Auditável sem Frameworks Externos de Pesos**
+   - *Decisão*: Construir o motor de tensores e backward pass explicitamente sobre NumPy.
+   - *Justificativa*: Garantir transparência total em auditorias de missão crítica, previsibilidade matemática de gradientes e independência absoluta de ecossistemas externos de pesos fechados.
+2. **ADR-02: Separação Rígida entre Inteligência Cognitiva e Execução de Rede**
+   - *Decisão*: O modelo neural gera propostas, diagnósticos e planos, mas não possui privilégios de execução direta sobre os equipamentos.
+   - *Justificativa*: Eliminar riscos de execução catastrófica decorrentes de alucinações de modelos probabilísticos.
+3. **ADR-03: Proibição Estrita de Aprovação Operacional por Voz**
+   - *Decisão*: O canal de voz é restrito à navegação, consultas e geração de planos preliminares.
+   - *Justificativa*: Ambientes de NOC apresentam ruídos de fundo e ambiguidades fonéticas que não oferecem a integridade necessária para alterações em infraestruturas críticas.
+4. **ADR-04: Transparência Epistemológica em 3 Níveis**
+   - *Decisão*: Cada conclusão da Veronica deve ser explicitamente etiquetada como `VERIFIED_FACT`, `TECHNICAL_INFERENCE` ou `HYPOTHESIS`.
+   - *Justificativa*: Evitar que o engenheiro operador tome como verdade inquestionável deduções estatísticas que demandem validação empírica.

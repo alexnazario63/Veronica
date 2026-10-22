@@ -7,7 +7,7 @@ from safety.policies import (
     TamperEvidentAuditLog,
 )
 from safety.rollback import RollbackOrchestrator
-from safety.change_control import DeterministicChangeController
+from safety.change_control import DeterministicChangeController, ChangePlan
 
 __all__ = [
     "ROLE_PERMISSIONS",
@@ -16,4 +16,5 @@ __all__ = [
     "TamperEvidentAuditLog",
     "RollbackOrchestrator",
     "DeterministicChangeController",
+    "ChangePlan",
 ]

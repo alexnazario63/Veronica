@@ -301,6 +301,69 @@ def analyze_protocol_anomalies(
             }
         )
 
+    for leak in operational_state.get("bgp_route_leaks", []):
+        prefix = leak.get("prefix", "desconhecido")
+        peer_ip = leak.get("peer_ip", "desconhecido")
+        leak_type = leak.get("leak_type", "UNAUTHORIZED_ROUTE_LEAK")
+        findings.append(
+            {
+                "domain": "routing.bgp_route_leak",
+                "domain_category": "routing",
+                "severity": "CRITICAL",
+                "summary": f"Route-leaking BGP detectado: prefixo {prefix} anunciado indevidamente para peer {peer_ip}",
+                "verified_facts": [
+                    f"Prefixo {prefix} foi propagado para o peer {peer_ip} violando políticas de exportação (RFC 7908 / RFC 9234).",
+                    f"Classificação do vazamento: {leak_type}.",
+                ],
+                "technical_inferences": [
+                    "Ausência de community no-export ou prefix-list permissivo propagando prefixos internos para trânsito público."
+                ],
+                "hypotheses": [
+                    "Falta de filtro de saída em sessão eBGP ou redistribuição IGP->BGP sem route-policy restritiva."
+                ],
+                "safe_diagnostic_commands": [
+                    f"show bgp ipv4 unicast advertised-routes neighbor {peer_ip}",
+                    f"display bgp routing-table {prefix}" if vendor == "Huawei" else f"show bgp ipv4 unicast {prefix}",
+                ],
+                "proposed_remediation_commands": [
+                    "route-policy DROP-LEAK deny",
+                    f"apply route-policy DROP-LEAK out neighbor {peer_ip}",
+                ],
+                "confidence": 0.98,
+            }
+        )
+
+    for part in operational_state.get("area_partitions", []):
+        area = part.get("area", "0.0.0.0")
+        proto = part.get("protocol", "OSPF")
+        isolated = part.get("isolated_nodes", [])
+        findings.append(
+            {
+                "domain": f"routing.{proto.lower()}_area_partition",
+                "domain_category": "routing",
+                "severity": "CRITICAL",
+                "summary": f"Partição de área {proto} ({area}) detectada: descontinuidade no plano de controle",
+                "verified_facts": [
+                    f"Área {proto} {area} dividida em múltiplos componentes desconexos.",
+                    f"Nós isolados do restante da área de trânsito: {', '.join(isolated)}.",
+                ],
+                "technical_inferences": [
+                    "Rompimento de enlaces de trânsito intra-área ou ausência de virtual-link OSPF gerando isolamento de roteamento."
+                ],
+                "hypotheses": [
+                    "Queda simultânea de adjacências de backbone ou partição física de rota."
+                ],
+                "safe_diagnostic_commands": [
+                    f"show {proto.lower()} database",
+                    f"show {proto.lower()} neighbor",
+                ],
+                "proposed_remediation_commands": [
+                    f"area {area} virtual-link <remote-abr-id>",
+                ],
+                "confidence": 0.96,
+            }
+        )
+
     # =========================================================================
     # DOMÍNIO 4: INFRAESTRUTURA (enlaces ópticos, transceptores, potência óptica, atenuação, DWDM, OTN, backbone, metro, redundância)
     # =========================================================================
@@ -394,6 +457,37 @@ def analyze_protocol_anomalies(
                 ],
                 "proposed_remediation_commands": fund.get("proposed_commands", []),
                 "confidence": 0.94,
+            }
+        )
+
+    for lacp in operational_state.get("lacp_anomalies", []):
+        bundle = lacp.get("bundle", "Eth-Trunk1")
+        member = lacp.get("member", "10GE1/0/1")
+        detail = lacp.get("detail", "Porta membro em flapping constante e status SUSPENDED")
+        findings.append(
+            {
+                "domain": "fundamentals.lacp_flapping",
+                "domain_category": "fundamentals",
+                "severity": "HIGH",
+                "summary": f"Flapping de agregação de enlace LACP no bundle {bundle} (membro {member})",
+                "verified_facts": [
+                    f"Porta membro {member} do bundle {bundle} apresenta instabilidade operacional: {detail}.",
+                    f"Capacidade de banda agregada reduzida no bundle {bundle}.",
+                ],
+                "technical_inferences": [
+                    "Temporizador LACP short/long mismatch, oscilação de sinal físico ou divergência de LACP system-priority / key."
+                ],
+                "hypotheses": [
+                    "Falha no transceptor óptico da porta membro ou problema de cabeamento causando perdas periódicas de LACPDU."
+                ],
+                "safe_diagnostic_commands": [
+                    f"display eth-trunk {bundle}" if vendor == "Huawei" else f"show lacp bundle {bundle}",
+                    "display lacp statistics" if vendor == "Huawei" else "show lacp counters",
+                ],
+                "proposed_remediation_commands": [
+                    f"interface {member}\n shutdown\n undo shutdown" if vendor == "Huawei" else f"interface {member}\n shutdown\n no shutdown",
+                ],
+                "confidence": 0.95,
             }
         )
 

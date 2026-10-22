@@ -72,8 +72,16 @@ def gradcheck(
         numeric = numerical_gradient(func, inp, eps=eps)
 
         diff_norm = float(np.linalg.norm(analytic - numeric))
-        denom = max(float(np.linalg.norm(analytic) + np.linalg.norm(numeric)), 1e-12)
-        rel_error = diff_norm / denom
+        norm_a = float(np.linalg.norm(analytic))
+        norm_n = float(np.linalg.norm(numeric))
+        denom = max(norm_a + norm_n, 1e-12)
+
+        # Trata valores analiticamente próximos de zero para evitar divisão espúria 0/0
+        if norm_a < atol and norm_n < atol and diff_norm < atol:
+            rel_error = 0.0
+        else:
+            rel_error = diff_norm / denom
+
         max_abs_diff = float(np.max(np.abs(analytic - numeric)))
 
         passed_tensor = bool(

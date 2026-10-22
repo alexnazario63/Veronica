@@ -9,7 +9,7 @@ Arquitetura Completa VeronicaTransformer:
 
 from __future__ import annotations
 
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Callable, Dict, Iterator, List, Optional, Tuple
 import numpy as np
 
 from core.neural.tensor import Tensor
@@ -169,17 +169,13 @@ class VeronicaTransformer(Module):
         self.neurogenesis_circuit = circuit
 
 
-    def forward(
+    def _forward_layers(
         self,
-        input_ids: np.ndarray,
+        ids: np.ndarray,
         past_kvs: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None,
         use_cache: bool = False,
         capture_diagnostics: bool = False,
     ) -> Tuple[Tensor, Optional[List[Tuple[np.ndarray, np.ndarray]]]]:
-        ids = np.asarray(input_ids, dtype=np.int64)
-        if ids.ndim == 1:
-            ids = ids[np.newaxis, :]
-
         offset = int(past_kvs[0][0].shape[2]) if past_kvs else 0
         x = self.token_embedding(ids)
         if self.pos_encoding is not None:
@@ -212,6 +208,135 @@ class VeronicaTransformer(Module):
         x = self.final_norm(x)
         logits = self.lm_head(x)
         return logits, (new_kvs if use_cache else None)
+
+    def forward(
+        self,
+        input_ids: np.ndarray,
+        past_kvs: Optional[List[Tuple[np.ndarray, np.ndarray]]] = None,
+        use_cache: bool = False,
+        capture_diagnostics: bool = False,
+        kv_cache: Optional[Any] = None,
+    ) -> Tuple[Tensor, Any]:
+        ids = np.asarray(input_ids, dtype=np.int64)
+        if ids.ndim == 1:
+            ids = ids[np.newaxis, :]
+
+        # Se PrefixKVCache fornecido, reutiliza prefixo existente
+        if kv_cache is not None:
+            tokens = [int(tid) for tid in ids[0]]
+            match = kv_cache.find_longest_prefix(tokens) if hasattr(kv_cache, "find_longest_prefix") else None
+            if match is not None:
+                matched_len, cached_kvs, cached_logits = match
+                if matched_len == len(tokens) and cached_logits is not None:
+                    return Tensor(cached_logits), {"kv_cache": kv_cache, "past_kvs": cached_kvs, "cached_prefix_len": matched_len}
+                if matched_len < len(tokens):
+                    suffix = ids[:, matched_len:]
+                    logits, new_kvs = self._forward_layers(suffix, past_kvs=cached_kvs, use_cache=True, capture_diagnostics=capture_diagnostics)
+                    if new_kvs is not None:
+                        kv_cache.put(tokens, new_kvs, logits.data)
+                    return logits, {"kv_cache": kv_cache, "past_kvs": new_kvs, "cached_prefix_len": matched_len}
+
+            logits, new_kvs = self._forward_layers(ids, past_kvs=None, use_cache=True, capture_diagnostics=capture_diagnostics)
+            if new_kvs is not None:
+                kv_cache.put(tokens, new_kvs, logits.data)
+            return logits, {"kv_cache": kv_cache, "past_kvs": new_kvs, "cached_prefix_len": 0}
+
+        logits, new_kvs = self._forward_layers(ids, past_kvs=past_kvs, use_cache=use_cache, capture_diagnostics=capture_diagnostics)
+        return logits, (new_kvs if use_cache else None)
+
+    def generate(
+        self,
+        prompt_ids: List[int],
+        max_new_tokens: int = 128,
+        temperature: float = 0.7,
+        top_k: int = 50,
+        top_p: float = 0.9,
+        stop_checker: Optional[Callable[[List[int]], bool]] = None,
+        kv_cache: Optional[Any] = None,
+    ) -> Iterator[int]:
+        """
+        Gera tokens autoregressivamente em streaming token-a-token com reutilização de PrefixKVCache.
+        """
+        if kv_cache is None:
+            from core.inference.generator import PrefixKVCache
+            if not hasattr(self, "_default_kv_cache"):
+                self._default_kv_cache = PrefixKVCache(max_entries=64)
+            cache = self._default_kv_cache
+        else:
+            cache = kv_cache
+
+        tokens = list(prompt_ids)
+        if not tokens:
+            tokens = [getattr(self.config, "bos_id", 1)]
+
+        self.eval()
+
+        # Reutilização de prefixo
+        match = cache.find_longest_prefix(tokens) if hasattr(cache, "find_longest_prefix") else None
+        past_kvs = None
+        logits_t: Optional[Tensor] = None
+        if match is not None:
+            matched_len, cached_past, cached_logits = match
+            past_kvs = cached_past
+            if matched_len == len(tokens) and cached_logits is not None:
+                cur_logits = cached_logits[0, -1, :] if cached_logits.ndim > 1 else cached_logits
+            else:
+                suffix = np.array([tokens[matched_len:]], dtype=np.int64)
+                logits_t, past_kvs = self.forward(suffix, past_kvs=past_kvs, use_cache=True)
+                cur_logits = logits_t.data[0, -1, :]
+                if past_kvs is not None:
+                    cache.put(tokens, past_kvs, logits_t.data)
+        else:
+            inp = np.array([tokens], dtype=np.int64)
+            logits_t, past_kvs = self.forward(inp, use_cache=True)
+            cur_logits = logits_t.data[0, -1, :]
+            if past_kvs is not None:
+                cache.put(tokens, past_kvs, logits_t.data)
+
+        generated: List[int] = []
+        eos_id = getattr(self.config, "eos_id", 2)
+
+        for _ in range(max_new_tokens):
+            scores = cur_logits.copy()
+            if temperature <= 1e-4:
+                next_id = int(np.argmax(scores))
+            else:
+                scaled = scores / max(temperature, 1e-4)
+                if 0 < top_k < scaled.size:
+                    k_idx = np.argpartition(scaled, -top_k)[-top_k:]
+                    mask = np.ones_like(scaled, dtype=bool)
+                    mask[k_idx] = False
+                    scaled[mask] = -1e9
+                shifted = scaled - np.max(scaled)
+                probs = np.exp(shifted) / np.sum(np.exp(shifted))
+                if 0.0 < top_p < 1.0:
+                    sorted_idx = np.argsort(probs)[::-1]
+                    sorted_probs = probs[sorted_idx]
+                    cumsum = np.cumsum(sorted_probs)
+                    cutoff = cumsum > top_p
+                    if np.any(cutoff):
+                        first_cut = int(np.argmax(cutoff))
+                        keep = sorted_idx[: max(first_cut + 1, 1)]
+                        f_probs = np.zeros_like(probs)
+                        f_probs[keep] = probs[keep]
+                        probs = f_probs / np.sum(f_probs)
+                next_id = int(np.random.choice(len(probs), p=probs))
+
+            if next_id == eos_id:
+                break
+
+            generated.append(next_id)
+            yield next_id
+
+            if stop_checker is not None and stop_checker(generated):
+                break
+
+            step_inp = np.array([[next_id]], dtype=np.int64)
+            logits_t, past_kvs = self.forward(step_inp, past_kvs=past_kvs, use_cache=True)
+            cur_logits = logits_t.data[0, -1, :]
+
+        if past_kvs is not None and generated and logits_t is not None:
+            cache.put(tokens + generated, past_kvs, logits_t.data)
 
     def encode_sequence_embedding(self, input_ids: List[int]) -> np.ndarray:
         """

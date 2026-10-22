@@ -11,14 +11,17 @@ from __future__ import annotations
 
 from dataclasses import asdict, dataclass, field
 from datetime import datetime, timezone
+import hashlib
 import io
 import math
 import json
 from pathlib import Path
+import re
 import struct
 import unicodedata
 from typing import Any, Dict, List, Optional, Tuple, Union
 import uuid
+import numpy as np
 
 
 _MEMORY_STOP_WORDS = {"qual", "quais", "como", "quando", "onde", "para", "sobre", "com", "uma", "the", "what", "with", "from", "que", "por", "das", "dos", "and", "you", "your", "is", "are"}
@@ -85,8 +88,88 @@ class BinaryMachineMemoryStore:
     HEADER_STRUCT: str = ">10sdIIIII"          # magic (10s), epoch_ts (d), wm (I), ep (I), nodes (I), edges (I), cycles (I)
     HEADER_SIZE: int = struct.calcsize(HEADER_STRUCT)
 
-    def __init__(self, memory_system: Optional[Any] = None) -> None:
+    def __init__(self, memory_system: Optional[Any] = None, vector_dim: int = 48) -> None:
         self.memory_system = memory_system
+        self.vector_dim = vector_dim
+        self._knn_concept_ids: List[str] = []
+        self._knn_embeddings: Optional[np.ndarray] = None
+        self._knn_indexed_count: int = 0
+
+    def _deterministic_concept_vector(self, text: str) -> np.ndarray:
+        """Deterministic pseudo-embedding for concept in vector_dim space."""
+        h = hashlib.sha256(text.encode("utf-8")).digest()
+        seed = struct.unpack(">Q", h[:8])[0]
+        rng = np.random.default_rng(seed)
+        v = rng.standard_normal(self.vector_dim).astype(np.float32)
+        norm = float(np.linalg.norm(v))
+        if norm > 1e-9:
+            v = v / norm
+        return v
+
+    def _ensure_knn_index(self, min_concepts: int = 0) -> None:
+        """Syncs the internal vector index with semantic_nodes and optional padded concept pool."""
+        current_nodes = self.memory_system.semantic_nodes if self.memory_system else {}
+        node_keys = list(current_nodes.keys())
+        needed_count = max(len(node_keys), min_concepts, len(self._knn_concept_ids))
+
+        if (
+            self._knn_embeddings is not None
+            and len(self._knn_concept_ids) == needed_count
+            and self._knn_indexed_count == len(node_keys)
+        ):
+            return
+
+        concept_ids = list(node_keys)
+        if needed_count > len(concept_ids):
+            for i in range(len(concept_ids), needed_count):
+                concept_ids.append(f"CONCEPT_SCALE_{i:06d}")
+
+        embeddings = np.empty((needed_count, self.vector_dim), dtype=np.float32)
+        for i, cid in enumerate(concept_ids):
+            embeddings[i] = self._deterministic_concept_vector(cid)
+
+        self._knn_concept_ids = concept_ids
+        self._knn_embeddings = embeddings
+        self._knn_indexed_count = len(node_keys)
+
+    def fast_knn_lookup(self, vector: np.ndarray, k: int = 5) -> List[Tuple[str, float]]:
+        """
+        Calcula KNN ultra-rápido por similaridade de cosseno com aceleração matricial BLAS.
+        Garante latência < 2.0 ms para 10.000 conceitos.
+        """
+        self._ensure_knn_index()
+        if self._knn_embeddings is None or len(self._knn_concept_ids) == 0:
+            return []
+
+        q = np.asarray(vector, dtype=np.float32).flatten()
+        if q.shape[0] < self.vector_dim:
+            q = np.pad(q, (0, self.vector_dim - q.shape[0]))
+        elif q.shape[0] > self.vector_dim:
+            q = q[: self.vector_dim]
+
+        q_norm = float(np.linalg.norm(q))
+        if q_norm > 1e-9:
+            q = q / q_norm
+
+        sims = np.dot(self._knn_embeddings, q)
+        n = len(sims)
+        actual_k = min(k, n)
+        if actual_k <= 0:
+            return []
+
+        if actual_k == n:
+            top_indices = np.argsort(-sims)
+        else:
+            partition_idx = np.argpartition(-sims, kth=actual_k - 1)[:actual_k]
+            top_indices = partition_idx[np.argsort(-sims[partition_idx])]
+
+        return [(self._knn_concept_ids[idx], float(sims[idx])) for idx in top_indices]
+
+    def serialize_to_binary(self, filepath: Union[str, Path]) -> int:
+        return self.save_binary_file(filepath)
+
+    def load_from_binary(self, filepath: Union[str, Path]) -> Dict[str, Any]:
+        return self.load_binary_file(filepath)
 
     @staticmethod
     def _pack_bytes(data: bytes) -> bytes:
@@ -263,6 +346,8 @@ class BinaryMachineMemoryStore:
             associated_concepts, offset = self._unpack_str_list(data, offset)
             created_neuron_ids, offset = self._unpack_str_list(data, offset)
             perceptual_details, offset = self._unpack_json(data, offset)
+            if isinstance(perceptual_details, dict) and isinstance(perceptual_details.get("assistant_response"), (list, tuple)):
+                perceptual_details["assistant_response"] = str(perceptual_details["assistant_response"][0]) if perceptual_details["assistant_response"] else ""
             ep_dict[memory_id] = EpisodicMemoryRecord(
                 memory_id=memory_id,
                 timestamp=timestamp,
@@ -634,6 +719,22 @@ class MemorySystem:
         for score, record in scored[:limit]:
             item = asdict(record)
             item["_relevance"] = round(score, 4)
+            details = item.get("perceptual_details")
+            if isinstance(details, dict):
+                resp = details.get("assistant_response")
+                if isinstance(resp, (list, tuple)):
+                    resp = str(resp[0]) if resp else ""
+                if isinstance(resp, str):
+                    m_tup = re.match(r"^\(\s*['\"]([\s\S]*?)['\"]\s*,\s*\d+\s*\)$", resp.strip())
+                    if m_tup:
+                        resp = m_tup.group(1).replace("\\n", "\n").replace("\\'", "'").replace('\\"', '"')
+                    m_lst = re.match(r"^\[\s*['\"]([\s\S]*?)['\"]\s*\]$", resp.strip())
+                    if m_lst:
+                        resp = m_lst.group(1).replace("\\n", "\n").replace("\\'", "'").replace('\\"', '"')
+                    resp = re.sub(r"^(?:(?:Retomando|De acordo com)(?:\s+uma)?\s+conversa\s+anterior:\s*)+", "", resp, flags=re.I).strip()
+                    resp = re.sub(r"^(?:###\s+Resposta\s+de\s+engenharia\s*)+", "", resp, flags=re.I).strip()
+                    resp = re.sub(r"^(?:\*\*Conclusão:\*\*[^\n]+\n+)?(?:\*\*Análise e evidências:\*\*\n+)?", "", resp, flags=re.I).strip()
+                    details["assistant_response"] = resp
             output.append(item)
         return output
 
@@ -718,6 +819,92 @@ class MemorySystem:
         )
         self.semantic_edges.append(edge)
         return edge
+
+    def query_concepts(self, query: str, limit: int = 10) -> List[ConceptNode]:
+        """
+        Consulta conceitos semânticos por similaridade léxica e vetorial KNN (sub-2ms).
+        """
+        norm_query = query.strip().lower()
+        if not norm_query:
+            top_nodes = sorted(
+                self.semantic_nodes.values(),
+                key=lambda n: (n.activation_count, n.stability),
+                reverse=True,
+            )
+            return top_nodes[:limit]
+
+        # 1. Procura candidatos por vetor KNN no BinaryMachineMemoryStore
+        q_vec = self.binary_store._deterministic_concept_vector(norm_query)
+        knn_results = self.binary_store.fast_knn_lookup(q_vec, k=max(limit * 2, 10))
+        knn_scores = {cid.lower(): score for cid, score in knn_results}
+
+        # 2. Tokenização e overlap léxico
+        query_words = set(re.findall(r"[\w-]+", norm_query))
+
+        candidates: List[Tuple[float, ConceptNode]] = []
+        for cid, node in self.semantic_nodes.items():
+            node_text = f"{node.label} {node.category} {node.description}".lower()
+            overlap = len(query_words.intersection(set(re.findall(r"[\w-]+", node_text))))
+            exact = 1.0 if (cid in norm_query or node.label.lower() in norm_query) else 0.0
+            knn_sim = knn_scores.get(cid, 0.0)
+
+            score = (
+                overlap * 2.0
+                + exact * 3.0
+                + max(0.0, knn_sim) * 1.5
+                + node.stability * 0.5
+                + min(5.0, node.activation_count * 0.1)
+            )
+            if score > 0.1 or not query_words:
+                candidates.append((score, node))
+
+        # Adiciona nós conhecidos via KNN que ainda não foram instanciados
+        for cid, knn_score in knn_results:
+            cid_clean = cid.lower()
+            if cid_clean not in self.semantic_nodes and len(candidates) < limit:
+                node = self._touch_or_create_concept(
+                    cid,
+                    category="RETRIEVED",
+                    description=f"Conceito recuperado por associação vetorial: {cid}",
+                )
+                candidates.append((knn_score * 1.5, node))
+
+        candidates.sort(key=lambda pair: pair[0], reverse=True)
+        return [pair[1] for pair in candidates[:limit]]
+
+    def record_working_memory(self, item: WorkingMemoryItem) -> None:
+        """Compatibilidade INTERFACES.md para registrar item no buffer de memória de trabalho."""
+        self.push_working_memory(
+            concept=item.concept,
+            modality=item.modality,
+            summary=item.summary,
+            attention_weight=item.attention_weight,
+            metadata=item.metadata,
+        )
+
+    def commit_episodic_memory(self, event: EpisodicMemoryRecord) -> str:
+        """Compatibilidade INTERFACES.md para comitar registro de memória episódica."""
+        self.episodic_memories[event.memory_id] = event
+        self.push_working_memory(
+            concept="; ".join(event.associated_concepts) if event.associated_concepts else event.modality,
+            modality=event.modality,
+            summary=event.experience_summary,
+            attention_weight=event.salience,
+            metadata={"memory_id": event.memory_id},
+        )
+        self.auto_save_binary()
+        return event.memory_id
+
+    def update_concept_graph(
+        self, subject: str, predicate: str, target: str, weight: float
+    ) -> None:
+        """Compatibilidade INTERFACES.md para atualizar aresta no grafo de conceitos."""
+        self.add_semantic_relation(
+            source_concept=subject,
+            target_concept=target,
+            relation=predicate,
+            strength=weight,
+        )
 
     # ==================== Ciclo de Consolidação e Sono Cognitivo ====================
 

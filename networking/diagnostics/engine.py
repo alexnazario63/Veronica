@@ -80,7 +80,9 @@ class NetworkDiagnosticEngine:
                     for w in (
                         "diagnost", "investig", "problema", "falha", "queda",
                         "erro", "alarme", "down", "active", "exstart", "stuck",
-                        "rede", "anomalia", "geral", "core", "neighbor"
+                        "rede", "anomalia", "geral", "core", "neighbor",
+                        "mtu", "ospf", "bgp", "correcao", "correção",
+                        "remediacao", "remediação", "rollback", "roteiro", "comandos",
                     )
                 )
                 if has_trouble_keyword:

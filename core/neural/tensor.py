@@ -1,6 +1,6 @@
 """
 Motor Matemático e de Diferenciação Automática (Autograd) da Veronica.
-Implementado desde os fundamentos matemáticos sobre arrays NumPy,
+Implementado desde os fundamentos matemáticos sobre arrays NumPy/CuPy/Numba,
 com cálculo analítico exato de gradientes e suporte a tensores N-dimensionais.
 """
 
@@ -9,6 +9,8 @@ from __future__ import annotations
 import math
 from typing import Any, Callable, List, Optional, Sequence, Set, Tuple, Union
 import numpy as np
+
+from core.neural import backend
 
 ArrayLike = Union[np.ndarray, float, int, Sequence[Any]]
 
@@ -27,7 +29,8 @@ def _unbroadcast(grad: np.ndarray, target_shape: Tuple[int, ...]) -> np.ndarray:
 
 class Tensor:
     """
-    Tensor multidimensional com grafo computacional dinâmico e Backpropagation.
+    Tensor multidimensional com grafo computacional dinâmico, autograd reverso
+    e integração transparente com hardware backends (NumPy, CuPy, JIT Numba).
     """
 
     def __init__(
@@ -39,38 +42,90 @@ class Tensor:
         name: Optional[str] = None,
         dtype: Any = np.float64,
     ) -> None:
+        backend_inst = backend.get_backend()
         if isinstance(data, Tensor):
             arr = data.data.astype(dtype, copy=True)
         elif isinstance(data, np.ndarray):
             arr = data.astype(dtype, copy=False)
+        elif hasattr(data, "get"):  # CuPy ndarray
+            arr = data.get().astype(dtype, copy=False)
         else:
             arr = np.array(data, dtype=dtype)
 
-        self.data: np.ndarray = arr
+        if backend_inst.name == "cupy":
+            self._data: Any = backend_inst.xp.asarray(arr)
+            self._grad: Optional[Any] = (
+                backend_inst.xp.zeros_like(self._data, dtype=np.float64)
+                if requires_grad
+                else None
+            )
+        else:
+            self._data = arr
+            self._grad = (
+                np.zeros_like(self._data, dtype=np.float64) if requires_grad else None
+            )
+
         self.requires_grad: bool = bool(requires_grad)
-        self.grad: Optional[np.ndarray] = (
-            np.zeros_like(self.data, dtype=np.float64) if self.requires_grad else None
-        )
         self._backward: Callable[[], None] = lambda: None
         self._prev: Set["Tensor"] = set(_children)
         self._op: str = _op
+        self.creator: Optional[Any] = _op if _op else None
         self.name: Optional[str] = name
 
     @property
+    def data(self) -> np.ndarray:
+        """Expõe transparentemente o array subjacente como np.ndarray."""
+        if hasattr(self._data, "get"):
+            return self._data.get()
+        return self._data
+
+    @data.setter
+    def data(self, value: Any) -> None:
+        if isinstance(value, Tensor):
+            value = value.data
+        b = backend.get_backend()
+        if b.name == "cupy":
+            self._data = b.xp.asarray(value)
+        else:
+            self._data = np.asarray(value)
+
+    @property
+    def grad(self) -> Optional[np.ndarray]:
+        """Expõe transparentemente o gradiente analítico como np.ndarray."""
+        if self._grad is None:
+            return None
+        if hasattr(self._grad, "get"):
+            return self._grad.get()
+        return self._grad
+
+    @grad.setter
+    def grad(self, value: Optional[Any]) -> None:
+        if value is None:
+            self._grad = None
+            return
+        if isinstance(value, Tensor):
+            value = value.data
+        b = backend.get_backend()
+        if b.name == "cupy":
+            self._grad = b.xp.asarray(value, dtype=np.float64)
+        else:
+            self._grad = np.asarray(value, dtype=np.float64)
+
+    @property
     def shape(self) -> Tuple[int, ...]:
-        return self.data.shape
+        return self._data.shape
 
     @property
     def ndim(self) -> int:
-        return self.data.ndim
+        return self._data.ndim
 
     @property
     def size(self) -> int:
-        return int(self.data.size)
+        return int(self._data.size)
 
     @property
     def dtype(self) -> Any:
-        return self.data.dtype
+        return self._data.dtype
 
     @property
     def T(self) -> "Tensor":
@@ -87,13 +142,21 @@ class Tensor:
 
     def zero_grad(self) -> None:
         if self.requires_grad:
-            self.grad = np.zeros_like(self.data, dtype=np.float64)
+            b = backend.get_backend()
+            if b.name == "cupy":
+                self._grad = b.xp.zeros_like(self._data, dtype=np.float64)
+            else:
+                self._grad = np.zeros_like(self._data, dtype=np.float64)
         else:
-            self.grad = None
+            self._grad = None
 
     def _ensure_grad(self) -> None:
-        if self.grad is None:
-            self.grad = np.zeros_like(self.data, dtype=np.float64)
+        if self._grad is None:
+            b = backend.get_backend()
+            if b.name == "cupy":
+                self._grad = b.xp.zeros_like(self._data, dtype=np.float64)
+            else:
+                self._grad = np.zeros_like(self._data, dtype=np.float64)
 
     @staticmethod
     def _coerce(other: Union["Tensor", ArrayLike], dtype: Any = np.float64) -> "Tensor":
@@ -303,7 +366,7 @@ class Tensor:
     def matmul(self, other: Union["Tensor", ArrayLike]) -> "Tensor":
         other_t = self._coerce(other, self.dtype)
         req_grad = self.requires_grad or other_t.requires_grad
-        out_data = np.matmul(self.data, other_t.data)
+        out_data = backend.matmul(self._data, other_t._data)
         out = Tensor(
             out_data,
             requires_grad=req_grad,
@@ -364,25 +427,28 @@ class Tensor:
     def __matmul__(self, other: Union["Tensor", ArrayLike]) -> "Tensor":
         return self.matmul(other)
 
-    def transpose(self, axes: Optional[Sequence[int]] = None) -> "Tensor":
-        if axes is None:
+    def transpose(self, *axes: Union[int, Sequence[int]]) -> "Tensor":
+        if len(axes) == 0 or (len(axes) == 1 and axes[0] is None):
             if self.ndim < 2:
                 return self
             axes_list = list(range(self.ndim))
             axes_list[-2], axes_list[-1] = axes_list[-1], axes_list[-2]
-            axes = tuple(axes_list)
+            target_axes: Optional[Tuple[int, ...]] = tuple(axes_list)
+        elif len(axes) == 1 and isinstance(axes[0], (tuple, list)):
+            target_axes = tuple(axes[0])
         else:
-            axes = tuple(axes)
+            target_axes = tuple(int(a) for a in axes)  # type: ignore
 
+        out_data = backend.transpose(self._data, axes=target_axes)
         out = Tensor(
-            np.transpose(self.data, axes=axes),
+            out_data,
             requires_grad=self.requires_grad,
             _children=(self,) if self.requires_grad else (),
             _op="transpose",
             dtype=self.dtype,
         )
 
-        inv_axes = tuple(np.argsort(axes))
+        inv_axes = tuple(np.argsort(target_axes))
 
         def _backward() -> None:
             if out.grad is not None and self.requires_grad:
@@ -404,8 +470,9 @@ class Tensor:
             target_shape = tuple(int(s) for s in shape)
 
         orig_shape = self.shape
+        out_data = backend.reshape(self._data, target_shape)
         out = Tensor(
-            self.data.reshape(target_shape),
+            out_data,
             requires_grad=self.requires_grad,
             _children=(self,) if self.requires_grad else (),
             _op="reshape",
@@ -444,7 +511,7 @@ class Tensor:
         axis: Optional[Union[int, Tuple[int, ...]]] = None,
         keepdims: bool = False,
     ) -> "Tensor":
-        out_data = self.data.sum(axis=axis, keepdims=keepdims)
+        out_data = backend.sum(self._data, axis=axis, keepdims=keepdims)
         out = Tensor(
             out_data,
             requires_grad=self.requires_grad,
@@ -504,14 +571,15 @@ class Tensor:
     # ==================== Funções de Ativação Analíticas ====================
 
     def relu(self) -> "Tensor":
-        mask = self.data > 0.0
+        out_data = backend.relu(self._data)
         out = Tensor(
-            np.where(mask, self.data, 0.0),
+            out_data,
             requires_grad=self.requires_grad,
             _children=(self,) if self.requires_grad else (),
             _op="relu",
             dtype=np.float64,
         )
+        mask = self.data > 0.0
 
         def _backward() -> None:
             if out.grad is not None and self.requires_grad:
@@ -526,12 +594,7 @@ class Tensor:
         GELU com aproximação Tanh de alta precisão e derivada analítica exata:
         GELU(x) = 0.5 * x * (1 + tanh(sqrt(2/pi) * (x + 0.044715 * x^3)))
         """
-        x = self.data
-        k = math.sqrt(2.0 / math.pi)
-        c = 0.044715
-        u = k * (x + c * (x ** 3))
-        t = np.tanh(u)
-        out_data = 0.5 * x * (1.0 + t)
+        out_data = backend.gelu(self._data)
         out = Tensor(
             out_data,
             requires_grad=self.requires_grad,
@@ -539,6 +602,11 @@ class Tensor:
             _op="gelu",
             dtype=np.float64,
         )
+        x = self.data
+        k = math.sqrt(2.0 / math.pi)
+        c = 0.044715
+        u = k * (x + c * (x ** 3))
+        t = np.tanh(u)
 
         def _backward() -> None:
             if out.grad is not None and self.requires_grad:
@@ -588,9 +656,7 @@ class Tensor:
         return out
 
     def softmax(self, axis: int = -1) -> "Tensor":
-        shifted = self.data - np.max(self.data, axis=axis, keepdims=True)
-        exps = np.exp(shifted)
-        probs = exps / np.sum(exps, axis=axis, keepdims=True)
+        probs = backend.softmax(self._data, axis=axis)
         out = Tensor(
             probs,
             requires_grad=self.requires_grad,
@@ -653,14 +719,21 @@ class Tensor:
         build_topo(self)
 
         self._ensure_grad()
+        b = backend.get_backend()
         if grad is None:
             if self.size != 1:
                 raise RuntimeError(
                     "Gradiente inicial pode ser omitido apenas para saídas escalares (size == 1)."
                 )
-            self.grad = np.ones_like(self.data, dtype=np.float64)
+            if b.name == "cupy":
+                self._grad = b.xp.ones_like(self._data, dtype=np.float64)
+            else:
+                self._grad = np.ones_like(self._data, dtype=np.float64)
         else:
-            self.grad = np.asarray(grad, dtype=np.float64).reshape(self.shape)
+            if b.name == "cupy":
+                self._grad = b.xp.asarray(grad, dtype=np.float64).reshape(self.shape)
+            else:
+                self._grad = np.asarray(grad, dtype=np.float64).reshape(self.shape)
 
         for node in reversed(topo):
             node._backward()

@@ -516,6 +516,165 @@ OFFICIAL_INITIAL_DOCUMENTS: List[KnowledgeDocument] = [
         domain="fundamentals",
     ),
     KnowledgeDocument(
+        doc_id="DOC-IETF-OSPF-METRICS-019",
+        title="IETF OSPFv2 / OSPFv3 — Métrica Máxima de Roteamento (MaxLinkMetric), RFC 2328, RFC 6987 e OSPF-TE",
+        content=(
+            "No protocolo OSPF (RFC 2328 / STD 54), a métrica de enlace é expressa como um número inteiro sem sinal de 16 bits, "
+            "com valor máximo escalar de 65.535 (65535 / 0xFFFF). O cálculo padrão de custo é definido como Reference Bandwidth dividido pela largura de banda da interface.\n"
+            "A RFC 6987 padroniza o mecanismo 'OSPF Stub Router Advertisement' (MaxLinkMetric): durante janelas de manutenção preventiva ou inicialização do nó, "
+            "o roteador anuncia a métrica máxima de 65.535 (0xFFFF) em todos os links de trânsito (Router-LSA), induzindo os demais roteadores da área a desviar "
+            "o tráfego de trânsito suavemente sem interrupção de adjacência.\n"
+            "Em extensões de engenharia de tráfego OSPF-TE (RFC 3630), as métricas estendidas utilizam campos de 24 bits nos sub-TLVs Link Metric, "
+            "suportando valores de custo de até 16.777.215 (16777215 / 0xFFFFFF) para alocação granular de largura de banda em links de alta capacidade (400Gbps+).\n\n"
+            "```mermaid\n"
+            "graph LR\n"
+            "  CORE01[\"ROUTER CORE-01\"] -->|\"Caminho Principal: Custo 10\"| CORE02[\"ROUTER CORE-02\"]\n"
+            "  CORE01 -.->|\"MaxLinkMetric: Custo 65535 RFC 6987\"| STUB[\"STUB ROUTER Manutenção\"]\n"
+            "```"
+        ),
+        vendor="IETF",
+        family_model="Multi-Vendor Standard (RFC 2328 / RFC 6987 / RFC 3630)",
+        os_name="RFC-Standard",
+        version_build="RFC-2328-6987-3630",
+        feature="OSPF Métrica Máxima, Custos, 16-bit 65.535, RFC 6987 MaxLinkMetric Stub Router, 24-bit 16.777.215 OSPF-TE",
+        original_source="IETF RFC 2328, RFC 6987 and RFC 3630 Standards",
+        source_uri="https://datatracker.ietf.org/doc/html/rfc2328",
+        page_section="RFC 2328 Section 16 & RFC 6987 Section 2",
+        published_date="2024-03-10",
+        consulted_date="2026-10-17",
+        reliability_score=0.99,
+        applicability_restrictions="Padrão normativo IETF; compatível com Cisco IOS-XR, Huawei VRP 8, Juniper Junos e Nokia SR-OS.",
+        extracted_commands=[
+            "router ospf 1",
+            "max-metric router-lsa",
+            "ip ospf cost 65535",
+            "show ip ospf",
+            "display ospf peer",
+            "show ip ospf interface",
+        ],
+        domain="routing",
+    ),
+    KnowledgeDocument(
+        doc_id="DOC-HUAWEI-VRP8-OSPF-020",
+        title="Huawei VRP 8 / VRP 5 — Guia Completo de Configuração, Ativação de Áreas e Verificação de OSPFv2 / OSPFv3",
+        content=(
+            "Para configurar o protocolo OSPF (Open Shortest Path First) no sistema operacional VRP da Huawei (roteadores NetEngine 8000, NE40E, NE20E e switches CloudEngine / S-Series), você precisa definir os endereços IP nas interfaces, iniciar o processo OSPF (especificando um router-id) e associar as redes/interfaces à respectiva área OSPF (geralmente a Área 0 para o backbone).\n\n"
+            "### Exemplo Prático de Topologia\n"
+            "- **Roteador:** Router-A\n"
+            "- **Router-ID:** 1.1.1.1\n"
+            "- **Interface GigabitEthernet0/0/1:** IP 10.0.0.1/30 conectada ao Router-B (Área 0)\n"
+            "- **Interface Loopback0:** IP 192.168.1.1/24 (Área 0)\n\n"
+            "### Passo a Passo de Configuração\n\n"
+            "#### 1. Configurar os endereços IP das interfaces\n"
+            "Antes de ativar o OSPF, certifique-se de que as interfaces possuem conectividade básica e estão ativas:\n\n"
+            "```cli\n"
+            "<Huawei> system-view\n"
+            "[Huawei] sysname Router-A\n\n"
+            "[Router-A] interface GigabitEthernet 0/0/1\n"
+            "[Router-A-GigabitEthernet0/0/1] ip address 10.0.0.1 255.255.255.252\n"
+            "[Router-A-GigabitEthernet0/0/1] undo shutdown\n"
+            "[Router-A-GigabitEthernet0/0/1] quit\n\n"
+            "[Router-A] interface Loopback 0\n"
+            "[Router-A-Loopback0] ip address 192.168.1.1 255.255.255.0\n"
+            "[Router-A-Loopback0] quit\n"
+            "```\n\n"
+            "#### 2. Configurar o OSPF e Anunciar Redes\n"
+            "Existem duas formas comuns de anunciar interfaces no OSPF da Huawei: via comando `network` (com wildcard mask) dentro da área ou diretamente na interface. A forma clássica via comando `network` é a mais utilizada:\n\n"
+            "```cli\n"
+            "[Router-A] ospf 1 router-id 1.1.1.1\n"
+            "[Router-A-ospf-1] area 0\n"
+            "[Router-A-ospf-1-area-0.0.0.0] network 10.0.0.0 0.0.0.3\n"
+            "[Router-A-ospf-1-area-0.0.0.0] network 192.168.1.0 0.0.0.255\n"
+            "[Router-A-ospf-1-area-0.0.0.0] return\n"
+            "<Router-A> save\n"
+            "```\n\n"
+            "**Atenção:** O Huawei utiliza máscara curinga (*wildcard mask*) no comando network. Para uma máscara /30 (`255.255.255.252`), o wildcard é `0.0.0.3`. Para /24, é `0.0.0.255`.\n"
+            "Em roteadores VRP 8 (como NetEngine 8000), alterações exigem `commit` (ou `commit trial 120` para proteção contra perda de gerência).\n\n"
+            "*(Método Alternativo)* Em versões mais recentes do VRP, você também pode ativar o OSPF diretamente dentro da interface:\n\n"
+            "```cli\n"
+            "[Router-A] interface GigabitEthernet 0/0/1\n"
+            "[Router-A-GigabitEthernet0/0/1] ospf 1 area 0\n"
+            "```\n\n"
+            "### Verificação e Diagnóstico\n"
+            "Para confirmar se as sessões de vizinhança subiram e se as rotas estão sendo aprendidas:\n\n"
+            "- **Verificar vizinhos OSPF:**\n"
+            "```cli\n"
+            "display ospf peer\n"
+            "display ospf peer brief\n"
+            "```\n"
+            "*(Verificação: O campo State do vizinho deve atingir o estado Full, ou 2-Way em caso de redes broadcast entre roteadores DROther).*\n\n"
+            "- **Verificar tabela de rotas OSPF aprendidas:**\n"
+            "```cli\n"
+            "display ospf routing\n"
+            "```\n\n"
+            "- **Verificar tabela de roteamento geral:**\n"
+            "```cli\n"
+            "display ip routing-table protocol ospf\n"
+            "```\n\n"
+            "- **Verificar interfaces ativas no OSPF:**\n"
+            "```cli\n"
+            "display ospf interface\n"
+            "```\n\n"
+            "### Parâmetros Opcionais Recomendados\n\n"
+            "- **Ajustar Custo/Métrica de Interface:**\n"
+            "```cli\n"
+            "[Router-A-GigabitEthernet0/0/1] ospf cost 10\n"
+            "```\n\n"
+            "- **Declarar Interface Passiva (Silent Interface):** (não envia pacotes Hello, ex.: redes de usuários/Loopbacks):\n"
+            "```cli\n"
+            "[Router-A] ospf 1\n"
+            "[Router-A-ospf-1] silent-interface Loopback 0\n"
+            "```\n\n"
+            "- **Alterar Tipo de Rede:** (ex.: para conexões ponto a ponto diretas sem eleição de DR/BDR):\n"
+            "```cli\n"
+            "[Router-A-GigabitEthernet0/0/1] ospf network-type p2p\n"
+            "```\n\n"
+            "- **Autenticação OSPF:**\n"
+            "```cli\n"
+            "[Router-A-GigabitEthernet0/0/1] ospf authentication-mode hmac-sha256 1 cipher SenhaForte123\n"
+            "```\n\n"
+            "```mermaid\n"
+            "graph LR\n"
+            "  R1[\"Router-A (ID: 1.1.1.1)\"] ---|\"Área 0 (10.0.0.0/30)\"| R2[\"Router-B (ID: 2.2.2.2)\"]\n"
+            "  R1 ---|\"Loopback0 (192.168.1.1/24)\"| L1[(\"Área 0\")]\n"
+            "```\n\n"
+            "### Precisa de ajuda com algum cenário específico ou troubleshooting?\n"
+            "- **Vizinho preso em ExStart:** Verificar divergência de MTU com `display interface` ou habilitar `ospf mtu-enable` em ambas as pontas.\n"
+            "- **Configurar OSPF Multi-Área (ABR):** Criação de áreas adicionais (ex.: `area 1`) e sumarização com `abr-summary`.\n"
+            "- **Autenticação OSPF:** Configuração de chaves criptográficas HMAC-SHA256 ou MD5 por interface ou por área."
+        ),
+        vendor="Huawei",
+        family_model="Huawei VRP (NetEngine 8000 / NE40E / CloudEngine / S-Series)",
+        os_name="VRP",
+        version_build="VRP 8.x / VRP 5.x",
+        feature="Huawei OSPF Configuration, Router-ID, Area 0, Network Wildcard, Display OSPF Peer, Full State, Silent Interface",
+        original_source="Huawei Official Documentation — VRP IP Routing: OSPF Configuration Guide",
+        source_uri="official://huawei/hedex/vrp8/ospf-configuration-guide",
+        page_section="Huawei VRP OSPF Configuration, Activation, Verification and Troubleshooting",
+        published_date="2024-05-10",
+        consulted_date="2026-10-22",
+        reliability_score=0.99,
+        applicability_restrictions="Válido para roteadores e switches Huawei VRP. Em VRP 8 requer commit.",
+        extracted_commands=[
+            "system-view",
+            "sysname",
+            "interface",
+            "ip address",
+            "ospf 1 router-id",
+            "area 0",
+            "network",
+            "ospf cost",
+            "silent-interface",
+            "ospf network-type p2p",
+            "display ospf peer",
+            "display ospf routing",
+            "display ip routing-table protocol ospf",
+            "display ospf interface",
+            "commit",
+        ],
+        domain="routing",
+    ),
+    KnowledgeDocument(
         doc_id="DOC-CISCO-IOSXR-ROUTING-ISIS-TE-012",
         title="Cisco IOS-XR 7.9 — Roteamento Avançado: Rotas Estáticas, OSPF, OSPFv3, IS-IS, BGP, MP-BGP, Políticas, Redistribuição e TE",
         content=(

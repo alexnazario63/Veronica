@@ -214,7 +214,7 @@ class BaseVendorAdapter(ABC):
     def get_topology_neighbors(self, device_id: str) -> List[Dict[str, Any]]: ...
 
     @abstractmethod
-    def collect_diagnostics(self, device_id: str, focus: str = "all") -> Dict[str, Any]: ...
+    def collect_diagnostics(self, device_id: str, focus: str = "all", **kwargs: Any) -> Dict[str, Any]: ...
 
     @abstractmethod
     def validate_commands(self, device_id: str, commands: List[str]) -> Dict[str, Any]: ...
@@ -253,6 +253,12 @@ class BaseVendorAdapter(ABC):
 
     @abstractmethod
     def rollback_change(self, device_id: str, rollback_plan: Dict[str, Any]) -> Dict[str, Any]: ...
+
+    def finalize_change(self, device_id: str, execution: Optional[Any] = None, **kwargs: Any) -> Dict[str, Any]:
+        """
+        Finaliza e torna permanente uma alteração transacional (ex.: commit confirmed).
+        """
+        return {"device_id": device_id, "finalized": True}
 
 
 class DigitalTwinNetworkAdapter(BaseVendorAdapter):
@@ -343,7 +349,7 @@ class DigitalTwinNetworkAdapter(BaseVendorAdapter):
         dev = self._get_dev(device_id)
         return list(dev.get("neighbors", []))
 
-    def collect_diagnostics(self, device_id: str, focus: str = "all") -> Dict[str, Any]:
+    def collect_diagnostics(self, device_id: str, focus: str = "all", **kwargs: Any) -> Dict[str, Any]:
         dev = self._get_dev(device_id)
         return {
             "device_id": device_id,
@@ -678,3 +684,138 @@ class DigitalTwinNetworkAdapter(BaseVendorAdapter):
             "rollback_commands_executed": rollback_plan["rollback_commands"],
             "timestamp": datetime.now(timezone.utc).isoformat(),
         }
+
+    def finalize_change(self, device_id: str, execution: Optional[Any] = None, **kwargs: Any) -> Dict[str, Any]:
+        dev = self._get_dev(device_id)
+        return {
+            "device_id": device_id,
+            "finalized": True,
+            "commit_confirmed_at": datetime.now(timezone.utc).isoformat(),
+            "status": "COMMITTED_PERSISTENT",
+            "execution": execution,
+        }
+
+
+class LiveVendorAdapter(BaseVendorAdapter):
+    """
+    Adaptador de produção multi-vendor para equipamentos reais da Veronica com suporte
+    a conectores assíncronos (Scrapli SSH, NETCONF e gNMI) e fallback determinístico
+    para o Digital Twin quando os equipamentos reais não estiverem acessíveis ou em
+    ambiente de teste/laboratório.
+    """
+
+    def __init__(
+        self,
+        inventory: Optional[Dict[str, Dict[str, Any]]] = None,
+        digital_twin: Optional[DigitalTwinNetworkAdapter] = None,
+        async_adapter: Optional[Any] = None,
+        fallback_to_digital_twin: bool = True,
+    ) -> None:
+        if digital_twin is not None:
+            self.digital_twin = digital_twin
+        else:
+            from networking.topology.graph import create_default_network_inventory
+
+            self.digital_twin = DigitalTwinNetworkAdapter(inventory or create_default_network_inventory())
+        self.async_adapter = async_adapter
+        self.fallback_to_digital_twin = fallback_to_digital_twin
+        self.backups = self.digital_twin.backups
+
+    def _run_async_or_fallback(self, op_name: str, device_id: str, *args: Any, **kwargs: Any) -> Any:
+        import asyncio
+
+        if self.async_adapter is not None:
+            async_method = getattr(self.async_adapter, op_name, None)
+            if callable(async_method):
+                try:
+                    try:
+                        loop = asyncio.get_running_loop()
+                    except RuntimeError:
+                        loop = None
+                    if loop is not None and loop.is_running():
+                        # Already in a running event loop; run via task in worker thread
+                        import concurrent.futures
+
+                        with concurrent.futures.ThreadPoolExecutor(max_workers=1) as pool:
+                            return pool.submit(asyncio.run, async_method(device_id, *args, **kwargs)).result()
+                    else:
+                        return asyncio.run(async_method(device_id, *args, **kwargs))
+                except (ConnectionError, TimeoutError, OSError, NotImplementedError):
+                    if not self.fallback_to_digital_twin:
+                        raise
+
+        twin_method = getattr(self.digital_twin, op_name)
+        return twin_method(device_id, *args, **kwargs)
+
+    def discover_device(self, device_id: str) -> Dict[str, Any]:
+        return self._run_async_or_fallback("discover_device", device_id)
+
+    def get_capabilities(self, device_id: str) -> Dict[str, Any]:
+        return self._run_async_or_fallback("get_capabilities", device_id)
+
+    def get_version(self, device_id: str) -> Dict[str, Any]:
+        return self._run_async_or_fallback("get_version", device_id)
+
+    def get_running_config(self, device_id: str) -> Dict[str, Any]:
+        return self._run_async_or_fallback("get_running_config", device_id)
+
+    def get_operational_state(self, device_id: str) -> Dict[str, Any]:
+        return self._run_async_or_fallback("get_operational_state", device_id)
+
+    def get_topology_neighbors(self, device_id: str) -> List[Dict[str, Any]]:
+        return self._run_async_or_fallback("get_topology_neighbors", device_id)
+
+    def collect_diagnostics(self, device_id: str, focus: str = "all", **kwargs: Any) -> Dict[str, Any]:
+        return self._run_async_or_fallback("collect_diagnostics", device_id, focus=focus)
+
+    def validate_commands(self, device_id: str, commands: List[str]) -> Dict[str, Any]:
+        return self._run_async_or_fallback("validate_commands", device_id, commands)
+
+    def generate_candidate(self, device_id: str, proposed_commands: List[str]) -> Dict[str, Any]:
+        return self._run_async_or_fallback("generate_candidate", device_id, proposed_commands)
+
+    def compare_configurations(self, running_cfg: str, candidate_cfg: str) -> Dict[str, Any]:
+        return self.digital_twin.compare_configurations(running_cfg, candidate_cfg)
+
+    def check_preconditions(self, device_id: str, commands: List[str]) -> Dict[str, Any]:
+        return self._run_async_or_fallback("check_preconditions", device_id, commands)
+
+    def create_backup(self, device_id: str) -> Dict[str, Any]:
+        return self._run_async_or_fallback("create_backup", device_id)
+
+    def prepare_rollback(self, device_id: str, backup: Dict[str, Any], commands: List[str]) -> Dict[str, Any]:
+        return self._run_async_or_fallback("prepare_rollback", device_id, backup, commands)
+
+    def apply_change(
+        self,
+        device_id: str,
+        commands: List[str],
+        approval_token: Optional[str] = None,
+        expected_config_hash: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        return self._run_async_or_fallback(
+            "apply_change",
+            device_id,
+            commands,
+            approval_token=approval_token,
+            expected_config_hash=expected_config_hash,
+        )
+
+    def verify_change(
+        self,
+        device_id: str,
+        baseline_state: Dict[str, Any],
+        post_state: Dict[str, Any],
+    ) -> Dict[str, Any]:
+        return self._run_async_or_fallback(
+            "verify_change",
+            device_id,
+            baseline_state,
+            post_state,
+        )
+
+    def rollback_change(self, device_id: str, rollback_plan: Dict[str, Any]) -> Dict[str, Any]:
+        return self._run_async_or_fallback("rollback_change", device_id, rollback_plan)
+
+    def finalize_change(self, device_id: str, execution: Optional[Any] = None, **kwargs: Any) -> Dict[str, Any]:
+        return self._run_async_or_fallback("finalize_change", device_id, execution=execution, **kwargs)

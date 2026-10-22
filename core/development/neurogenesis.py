@@ -472,6 +472,71 @@ class NeurogenesisEngine:
             self.save_circuit()
         return born
 
+    def evaluate_signal_surprise(self, circuit: str, signal: np.ndarray) -> float:
+        """
+        Avalia o grau de surpresa sensorial/novidade do sinal perante os neurônios do circuito.
+        Retorna score entre 0.0 (totalmente esperado/familiar) e 1.0 (máxima novidade/surpresa).
+        Limiar padrão ontogenético: tau = 0.75.
+        """
+        neurons = self.circuit.neurons
+        if not neurons:
+            return 1.0
+
+        sig = np.asarray(signal, dtype=np.float64).flatten()
+        sig_norm = float(np.linalg.norm(sig))
+        if sig_norm < 1e-9:
+            return 0.0
+        sig_unit = sig / sig_norm
+
+        max_sim = 0.0
+        for neuron in neurons:
+            w = neuron.weight.data.flatten()
+            w_norm = float(np.linalg.norm(w))
+            if w_norm > 1e-9:
+                min_len = min(len(sig_unit), len(w))
+                dot = float(np.dot(sig_unit[:min_len], w[:min_len] / w_norm))
+                sim = abs(dot)
+                if sim > max_sim:
+                    max_sim = sim
+
+        surprise = max(0.0, min(1.0, 1.0 - max_sim))
+        return float(surprise)
+
+    def trigger_neurogenesis(
+        self,
+        circuit: str,
+        signal: np.ndarray,
+        reason: str = "Surpresa sensorial elevada (tau > 0.75)",
+    ) -> DynamicNeuron:
+        """
+        Dispara o nascimento ontogenético de um novo DynamicNeuron dedicado ao estímulo surpreendente.
+        """
+        born = self.trigger_neurogenesis_for_concept(
+            concept=reason,
+            modality=circuit,
+            seed_embedding=signal,
+            intensity=1,
+            details={"trigger_signal_shape": list(np.asarray(signal).shape), "circuit": circuit},
+            auto_save=True,
+        )
+        return born[0]
+
+    def prune_idle_synapses(self, inactivity_threshold_cycles: int = 50) -> int:
+        """
+        Poda sinapses e conexões ociosas ou enfraquecidas por desuso prolongado (plasticidade retrógrada).
+        """
+        initial_count = len(self.circuit.neurons)
+        retained = [
+            n for n in self.circuit.neurons
+            if n.firing_count > 0 or n.developmental_stage in ("SPECIALIZED", "MATURE")
+        ]
+        pruned = initial_count - len(retained)
+        if pruned > 0 and len(retained) > 0:
+            self.circuit.neurons = retained
+            self.circuit._neuron_lookup = {n.neuron_id: n for n in retained}
+            self.save_circuit()
+        return pruned
+
     def export_summary(self) -> Dict[str, Any]:
         """Retorna resumo estatístico da neurogênese para a interface e APIs."""
         neurons = self.circuit.neurons

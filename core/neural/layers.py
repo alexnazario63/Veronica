@@ -10,6 +10,7 @@ import numpy as np
 
 from core.neural.tensor import Tensor
 from core.neural.init import xavier_uniform_, normal_
+from core.neural import backend
 
 
 class Parameter(Tensor):
@@ -246,6 +247,9 @@ class LayerNorm(Module):
         self.beta = Parameter(np.zeros((normalized_shape,), dtype=np.float64), name="beta")
 
     def forward(self, x: Tensor) -> Tensor:
+        if not self.training and not x.requires_grad:
+            out_data = backend.layer_norm(x.data, self.gamma.data, self.beta.data, self.eps)
+            return Tensor(out_data, requires_grad=False)
         mean = x.mean(axis=-1, keepdims=True)
         centered = x - mean
         var = (centered ** 2).mean(axis=-1, keepdims=True)
@@ -267,6 +271,9 @@ class RMSNorm(Module):
         self.weight = Parameter(np.ones((normalized_shape,), dtype=np.float64), name="weight")
 
     def forward(self, x: Tensor) -> Tensor:
+        if not self.training and not x.requires_grad:
+            out_data = backend.rms_norm(x.data, self.weight.data, self.eps)
+            return Tensor(out_data, requires_grad=False)
         ms = (x ** 2).mean(axis=-1, keepdims=True)
         rms = (ms + self.eps).sqrt()
         return (x / rms) * self.weight

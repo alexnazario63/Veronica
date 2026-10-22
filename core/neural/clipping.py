@@ -26,12 +26,28 @@ def has_non_finite_gradients(params: Iterable[Parameter]) -> bool:
     return False
 
 
-def clip_grad_norm_(params: Iterable[Parameter], max_norm: float, eps: float = 1e-6) -> float:
+def sanitize_gradients_(params: Iterable[Parameter]) -> None:
+    """Substitui NaN/Inf por valores finitos determinísticos nos gradientes."""
+    for p in params:
+        if p.requires_grad and p.grad is not None:
+            if not np.all(np.isfinite(p.grad)):
+                np.nan_to_num(p.grad, copy=False, nan=0.0, posinf=1.0, neginf=-1.0)
+
+
+def clip_grad_norm_(params: Iterable[Parameter], max_norm: float = 1.0, eps: float = 1e-6) -> float:
     """
     Limita a norma L2 global dos gradientes para evitar explosão de gradientes.
+    Garante zero NaN/Inf substituindo valores não-finitos por zero/limites finitos.
+    Padrão: gamma_max = 1.0.
     Retorna a norma total antes do corte.
     """
     param_list: List[Parameter] = [p for p in params if p.requires_grad and p.grad is not None]
+    
+    # Sanitização defensiva: elimina qualquer NaN/Inf pré-existente
+    for p in param_list:
+        if not np.all(np.isfinite(p.grad)):
+            np.nan_to_num(p.grad, copy=False, nan=0.0, posinf=max_norm, neginf=-max_norm)
+
     total_norm = compute_grad_norm(param_list)
     if max_norm > 0.0 and total_norm > max_norm:
         clip_coef = max_norm / (total_norm + eps)
@@ -46,6 +62,8 @@ def clip_grad_value_(params: Iterable[Parameter], clip_value: float) -> None:
     bound = abs(float(clip_value))
     for p in params:
         if p.requires_grad and p.grad is not None:
+            if not np.all(np.isfinite(p.grad)):
+                np.nan_to_num(p.grad, copy=False, nan=0.0, posinf=bound, neginf=-bound)
             np.clip(p.grad, -bound, bound, out=p.grad)
 
 

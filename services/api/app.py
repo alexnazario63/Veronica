@@ -19,6 +19,7 @@ from fastapi.responses import HTMLResponse, JSONResponse, StreamingResponse
 from fastapi.staticfiles import StaticFiles
 from pydantic import BaseModel, Field
 from core.contracts import NetCanvasArtifact, MessageDelta
+from services.api.auth import create_jwt_token, resolve_tenant_context, validate_jwt_token, TenantContext
 from services.api.streaming import json_bytes, sse_frame
 from services.api.workspace import ArtifactStore
 
@@ -44,6 +45,37 @@ class SendMessageRequest(BaseModel):
     model_profile: Literal["vrn-fast", "vrn-pro", "vrn-ultra"] = "vrn-pro"
     response_style: Literal["technical", "natural", "mixed", "engineer"] = "technical"
     image_data: Optional[str] = Field(default=None)
+    mentions: Optional[Dict[str, List[str]]] = None
+    selected_lines_range: Optional[Dict[str, int]] = None
+    selected_artifact_id: Optional[str] = None
+    selected_artifact_version: Optional[int] = None
+    patch_diff: Optional[str] = None
+    tenant_id: Optional[str] = None
+
+
+class TokenIssueRequest(BaseModel):
+    user_id: str = "usr-eng-01"
+    tenant_id: str = "default"
+    role: str = "NETWORK_ENGINEER"
+    expires_in_seconds: int = 3600
+
+
+class SaveArtifactRequest(BaseModel):
+    artifact_id: str
+    title: str
+    content: str
+    kind: str = "config_diff"
+    plan_id: Optional[str] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ProposeArtifactPatchRequest(BaseModel):
+    version: int
+    patch_diff: str
+
+
+class LinkArtifactPlanRequest(BaseModel):
+    plan_id: str
 
 
 class ConversationFeedbackRequest(BaseModel):
@@ -206,7 +238,7 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         default_response_class=_FastJSONResponse,
     )
     app.state.hub = hub
-    app.state.artifact_store = ArtifactStore(base_dir / "netcanvas_artifacts.sqlite3")
+    app.state.artifact_store = hub.artifact_store
     app.state.agent_orchestrators = {}
 
     @app.on_event("startup")
@@ -221,6 +253,18 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         allow_headers=["*"],
     )
 
+    def _resolve_caller(
+        authorization: Optional[str] = None,
+        x_user_id: Optional[str] = None,
+        x_tenant_id: Optional[str] = None,
+    ) -> TenantContext:
+        return resolve_tenant_context(
+            rbac=hub.rbac,
+            authorization=authorization,
+            x_user_id=x_user_id,
+            x_tenant_id=x_tenant_id,
+        )
+
     def _handle_domain_errors(fn_call: Any) -> Any:
         try:
             return fn_call()
@@ -234,14 +278,57 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         except RuntimeError as exc:
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    # ==================== 0. Autenticação e Multi-Tenancy (Fase K) ====================
+
+    @app.post("/api/auth/token")
+    def issue_auth_token(req: TokenIssueRequest) -> Dict[str, Any]:
+        """Emite token assinado JWT / OIDC com isolamento por Tenant."""
+        claims = {
+            "sub": req.user_id,
+            "user_id": req.user_id,
+            "tenant_id": req.tenant_id,
+            "role": req.role,
+        }
+        token = create_jwt_token(claims, expires_in_seconds=req.expires_in_seconds)
+        return {
+            "access_token": token,
+            "token_type": "Bearer",
+            "user_id": req.user_id,
+            "tenant_id": req.tenant_id,
+            "role": req.role,
+            "expires_in": req.expires_in_seconds,
+        }
+
+    @app.get("/api/auth/me")
+    def get_current_user_info(
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        """Retorna o contexto do usuário autenticado e permissões ativas no RBAC."""
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        return {
+            "user_id": caller.user_id,
+            "tenant_id": caller.tenant_id,
+            "role": caller.role,
+            "permissions": sorted(list(caller.permissions)),
+            "authenticated_via": "Bearer" if caller.token else "Header",
+        }
+
     # ==================== 1. Conversas e Chat ====================
 
     @app.get("/api/conversations")
-    def list_conversations(x_user_id: str = Header(default="usr-eng-01")) -> Dict[str, Any]:
+    def list_conversations(
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
         return _handle_domain_errors(
             lambda: {
-                "user_id": x_user_id,
-                "conversations": hub.conversation_service.list_conversations(x_user_id),
+                "user_id": caller.user_id,
+                "tenant_id": caller.tenant_id,
+                "conversations": hub.conversation_service.list_conversations(caller.user_id, tenant_id=caller.tenant_id),
             }
         )
 
@@ -249,12 +336,16 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
     def create_conversation(
         req: CreateConversationRequest,
         x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
     ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
         return _handle_domain_errors(
             lambda: hub.conversation_service.create_conversation(
-                user_id=x_user_id,
+                user_id=caller.user_id,
                 title=req.title,
                 model_version=hub.trainer.model_version,
+                tenant_id=caller.tenant_id,
             )
         )
 
@@ -263,11 +354,14 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         conversation_id: str,
         req: RenameConversationRequest,
         x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
     ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
         return _handle_domain_errors(
             lambda: hub.conversation_service.rename_conversation(
                 conversation_id=conversation_id,
-                user_id=x_user_id,
+                user_id=caller.user_id,
                 new_title=req.title,
             )
         )
@@ -276,24 +370,30 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
     def get_conversation_history(
         conversation_id: str,
         x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
     ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
         return _handle_domain_errors(
-            lambda: hub.conversation_service.get_conversation(conversation_id, x_user_id)
+            lambda: hub.conversation_service.get_conversation(conversation_id, caller.user_id, tenant_id=caller.tenant_id)
         )
 
     @app.delete("/api/conversations/{conversation_id}")
     def delete_conversation_endpoint(
         conversation_id: str,
         x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
     ) -> Dict[str, Any]:
         """Exclui permanentemente uma conversa e seu histórico (estilo Claude/ChatGPT)."""
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
         def _delete() -> Dict[str, Any]:
-            result = hub.conversation_service.delete_conversation(conversation_id, x_user_id)
+            result = hub.conversation_service.delete_conversation(conversation_id, caller.user_id)
             memory = hub.development_engine.memory
-            forgotten = memory.forget_conversation(conversation_id, x_user_id)
+            forgotten = memory.forget_conversation(conversation_id, caller.user_id)
             memory.working_memory = [
                 item for item in memory.working_memory
-                if not (item.metadata.get("user_id") == x_user_id and item.metadata.get("conversation_id") == conversation_id)
+                if not (item.metadata.get("user_id") == caller.user_id and item.metadata.get("conversation_id") == conversation_id)
             ]
             memory.auto_save_binary()
             result["episodic_memories_forgotten"] = forgotten
@@ -305,16 +405,28 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         conversation_id: str,
         req: SendMessageRequest,
         x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
     ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        eff_tenant = req.tenant_id or caller.tenant_id
         return _handle_domain_errors(
             lambda: hub.chat_service.handle_message(
                 conversation_id=conversation_id,
-                user_id=x_user_id,
+                user_id=caller.user_id,
                 message_text=req.content,
                 modality=req.modality,
                 target_devices=req.target_devices,
                 mode=req.mode or "chat",
                 image_data=req.image_data,
+                model_profile=req.model_profile,
+                response_style=req.response_style,
+                mentions=req.mentions,
+                selected_lines_range=req.selected_lines_range,
+                selected_artifact_id=req.selected_artifact_id,
+                selected_artifact_version=req.selected_artifact_version,
+                patch_diff=req.patch_diff,
+                tenant_id=eff_tenant,
             )
         )
 
@@ -333,22 +445,32 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         req: SendMessageRequest,
         request: Request,
         x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
     ) -> StreamingResponse:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        eff_tenant = req.tenant_id or caller.tenant_id
         _handle_domain_errors(
-            lambda: hub.conversation_service.get_conversation(conversation_id, x_user_id)
+            lambda: hub.conversation_service.get_conversation(conversation_id, caller.user_id, tenant_id=caller.tenant_id)
         )
 
         async def _token_stream():
             try:
                 for event in hub.chat_service.stream_message(
                     conversation_id=conversation_id,
-                    user_id=x_user_id,
+                    user_id=caller.user_id,
                     message_text=req.content,
                     modality=req.modality,
                     target_devices=req.target_devices,
                     mode=req.mode or "chat",
                     model_profile=req.model_profile,
                     response_style=req.response_style,
+                    mentions=req.mentions,
+                    selected_lines_range=req.selected_lines_range,
+                    selected_artifact_id=req.selected_artifact_id,
+                    selected_artifact_version=req.selected_artifact_version,
+                    patch_diff=req.patch_diff,
+                    tenant_id=eff_tenant,
                 ):
                     if await request.is_disconnected():
                         hub.chat_service.cancel_generation(conversation_id)
@@ -472,9 +594,133 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
 
         return StreamingResponse(_events(), media_type="text/event-stream", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
 
+    # ==================== 1.1 WebSocket Chat & Streaming SSE/WS ====================
+
+    @app.websocket("/api/conversations/{conversation_id}/ws")
+    @app.websocket("/api/chat/ws")
+    async def chat_websocket_endpoint(websocket: WebSocket, conversation_id: Optional[str] = None) -> None:
+        """Streaming bidirecional SSE/WS unificado para Chat, Agent e Work."""
+        await websocket.accept()
+        conv_id = conversation_id or f"conv-ws-{uuid.uuid4().hex[:8]}"
+        user_id = websocket.headers.get("x-user-id", "usr-eng-01")
+        tenant_id = websocket.headers.get("x-tenant-id", "default")
+        auth = websocket.headers.get("authorization")
+        if auth:
+            try:
+                caller = resolve_tenant_context(hub.rbac, authorization=auth)
+                user_id = caller.user_id
+                tenant_id = caller.tenant_id
+            except Exception:
+                pass
+
+        try:
+            while True:
+                msg_data = await websocket.receive_json()
+                if not isinstance(msg_data, dict):
+                    continue
+                action = msg_data.get("action")
+                if action == "cancel":
+                    hub.chat_service.cancel_generation(conv_id)
+                    await websocket.send_json({"type": "cancelled", "conversation_id": conv_id})
+                    continue
+                if action == "ping":
+                    await websocket.send_json({"type": "pong", "time": __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()})
+                    continue
+
+                content = str(msg_data.get("content", "")).strip()
+                if not content:
+                    continue
+
+                # Garante que a conversa exista no ConversationService
+                try:
+                    hub.conversation_service.get_conversation(conv_id, user_id, tenant_id=tenant_id)
+                except Exception:
+                    hub.conversation_service.create_conversation(
+                        user_id=user_id,
+                        title=content[:40] or "Sessão WebSocket",
+                        model_version=hub.trainer.model_version,
+                        tenant_id=tenant_id,
+                    )
+
+                req_mode = msg_data.get("mode", "chat")
+                selected_range = msg_data.get("selected_lines_range")
+                target_art = msg_data.get("selected_artifact_id")
+
+                for event in hub.chat_service.stream_message(
+                    conversation_id=conv_id,
+                    user_id=user_id,
+                    message_text=content,
+                    modality=msg_data.get("modality", "TEXT"),
+                    target_devices=msg_data.get("target_devices"),
+                    mode=req_mode,
+                    model_profile=msg_data.get("model_profile", "vrn-pro"),
+                    response_style=msg_data.get("response_style", "technical"),
+                    mentions=msg_data.get("mentions"),
+                    selected_lines_range=selected_range,
+                    selected_artifact_id=target_art,
+                    selected_artifact_version=msg_data.get("selected_artifact_version"),
+                    patch_diff=msg_data.get("patch_diff"),
+                    tenant_id=tenant_id,
+                ):
+                    await websocket.send_json(event)
+                    await asyncio.sleep(0.002)
+
+        except WebSocketDisconnect:
+            pass
+        except Exception as exc:
+            try:
+                await websocket.send_json({"type": "error", "message": str(exc)})
+            except Exception:
+                pass
+
+    # ==================== 1.2 Workspace Artifacts (INTERFACES.md) ====================
+
     @app.get("/api/workspace/artifacts")
-    async def list_workspace_artifacts(x_user_id: str = Header(default="usr-eng-01")) -> Dict[str, Any]:
-        return {"artifacts": await app.state.artifact_store.list(x_user_id)}
+    async def list_workspace_artifacts(
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        arts = hub.artifact_store.list_artifacts(tenant_id=caller.tenant_id)
+        if not arts:
+            legacy = await app.state.artifact_store.list(caller.user_id)
+            return {"artifacts": legacy}
+        return {"artifacts": arts}
+
+    @app.post("/api/workspace/artifacts")
+    async def create_workspace_artifact(
+        body: Dict[str, Any] = Body(...),
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        if "artifact" in body and isinstance(body["artifact"], dict):
+            art_dict = body["artifact"]
+            created = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
+            await app.state.artifact_store.save(caller.user_id, art_dict, created)
+            return {"artifact": art_dict, "created_at": created}
+
+        aid = str(body.get("artifact_id") or body.get("id") or f"art-{uuid.uuid4().hex[:8]}")
+        title = str(body.get("title", f"Artifact {aid}"))
+        content = str(body.get("content") or body.get("proposed_content", ""))
+        kind = str(body.get("kind") or body.get("type", "config_diff"))
+        plan_id = body.get("plan_id")
+        metadata = body.get("metadata")
+
+        version = hub.artifact_store.save_artifact(
+            artifact_id=aid,
+            title=title,
+            content=content,
+            kind=kind,
+            author=caller.user_id,
+            plan_id=plan_id,
+            metadata=metadata,
+            tenant_id=caller.tenant_id,
+        )
+        saved = hub.artifact_store.get_artifact(aid, version=version)
+        return {"artifact_id": aid, "version": version, "artifact": saved}
 
     @app.put("/api/workspace/artifacts")
     async def save_workspace_artifact(req: WorkspaceArtifactRequest,
@@ -483,6 +729,75 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         created = __import__("datetime").datetime.now(__import__("datetime").timezone.utc).isoformat()
         await app.state.artifact_store.save(x_user_id, artifact, created)
         return {"artifact": artifact, "created_at": created}
+
+    @app.get("/api/workspace/artifacts/{artifact_id}")
+    async def get_workspace_artifact_endpoint(
+        artifact_id: str,
+        version: Optional[int] = None,
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        art = hub.artifact_store.get_artifact(artifact_id, version=version)
+        if art is None:
+            raise HTTPException(status_code=404, detail=f"Artifact '{artifact_id}' not found.")
+        return {"artifact": art}
+
+    @app.get("/api/workspace/artifacts/{artifact_id}/history")
+    async def get_workspace_artifact_history_endpoint(
+        artifact_id: str,
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        history = hub.artifact_store.get_version_history(artifact_id)
+        return {"artifact_id": artifact_id, "history": history}
+
+    @app.post("/api/workspace/artifacts/{artifact_id}/propose-patch")
+    async def propose_workspace_artifact_patch_endpoint(
+        artifact_id: str,
+        req: ProposeArtifactPatchRequest,
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        return _handle_domain_errors(
+            lambda: hub.artifact_store.propose_patch(
+                artifact_id=artifact_id,
+                version=req.version,
+                patch_diff=req.patch_diff,
+                author=caller.user_id,
+            )
+        )
+
+    @app.get("/api/workspace/artifacts/{artifact_id}/diff")
+    async def diff_workspace_artifact_endpoint(
+        artifact_id: str,
+        v1: int,
+        v2: int,
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        return _handle_domain_errors(
+            lambda: hub.artifact_store.diff_versions(artifact_id=artifact_id, v1=v1, v2=v2)
+        )
+
+    @app.post("/api/workspace/artifacts/{artifact_id}/link-plan")
+    async def link_workspace_artifact_plan_endpoint(
+        artifact_id: str,
+        req: LinkArtifactPlanRequest,
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> Dict[str, Any]:
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        hub.artifact_store.link_change_plan(artifact_id, req.plan_id)
+        return {"artifact_id": artifact_id, "linked_plan_id": req.plan_id, "status": "LINKED"}
 
     @app.get("/api/workspace/artifacts/{artifact_id}/versions")
     async def get_workspace_artifact_versions(artifact_id: str,
@@ -959,8 +1274,8 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
         req: CreateChangePlanRequest,
         x_user_id: str = Header(default="usr-eng-01"),
     ) -> Dict[str, Any]:
-        return _handle_domain_errors(
-            lambda: hub.change_controller.create_change_plan_stages_1_to_5(
+        def _exec():
+            plan = hub.change_controller.create_change_plan_stages_1_to_5(
                 requester_user_id=x_user_id,
                 device_id=req.device_id,
                 title=req.title,
@@ -968,7 +1283,25 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
                 maintenance_window=req.maintenance_window,
                 origin_channel=req.origin_channel,
             )
-        )
+            # Vínculo direto no ArtifactStore com o ID do plano (change_id)
+            try:
+                chg_id = str(plan.get("change_id", ""))
+                content_text = json.dumps(plan.get("stages", {}), indent=2, default=str)
+                hub.artifact_store.save_artifact(
+                    artifact_id=chg_id,
+                    title=f"Plano 10 Etapas: {plan.get('title', chg_id)}",
+                    content=content_text,
+                    kind="change_plan_10_steps",
+                    author=x_user_id,
+                    plan_id=chg_id,
+                    metadata={"device_id": plan.get("device_id"), "risk_level": plan.get("risk_level")},
+                )
+            except Exception as exc:
+                import logging
+                logging.getLogger(__name__).warning("Falha ao sincronizar artefato do plano: %s", exc)
+            return plan
+
+        return _handle_domain_errors(_exec)
 
     @app.post("/api/network/changes/{change_id}/approve")
     def approve_change(

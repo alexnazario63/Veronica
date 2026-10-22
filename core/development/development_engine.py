@@ -16,7 +16,9 @@ import json
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Union
 import uuid
+import numpy as np
 
+from knowledge.ingestion.sanitizer import sanitize_untrusted_text
 from core.development.neurogenesis import DynamicNeuron, NeurogenesisEngine
 from core.development.memory_system import MemorySystem
 from core.development.perception import (
@@ -397,6 +399,82 @@ class DevelopmentEngine:
             "autonomous_learning": self.autonomous_learning.get_status() if self.autonomous_learning else {"is_running": False, "cycles_completed": 0},
             "introspective_narrative": self.introspective_reflection()["introspective_narrative"],
         }
+
+    def get_status(self) -> Dict[str, Any]:
+        """Retorna o panorama completo de desenvolvimento (compatibilidade INTERFACES.md)."""
+        return self.get_full_development_status()
+
+    def record_perception(
+        self,
+        modality: str,
+        raw_data: Any,
+        context_hint: Optional[str] = None,
+        user_id: str = "operator",
+    ) -> Dict[str, Any]:
+        """
+        Registra percepção sensorial (Visão, Leitura, Telemetria de Rede ou Observação de Ferramenta),
+        avalia a surpresa neural com limiar tau = 0.75 e grava memória episódica viva.
+        """
+        mod_upper = modality.upper()
+        if mod_upper == "VISION":
+            return self.see_and_learn(raw_data, context_hint=context_hint or "", user_id=user_id)
+        if mod_upper == "READING":
+            return self.read_and_learn(str(raw_data), title=context_hint or "Documento Técnico", user_id=user_id)
+
+        raw_str = json.dumps(raw_data, ensure_ascii=False) if isinstance(raw_data, (dict, list)) else str(raw_data)
+        safe_text = sanitize_untrusted_text(raw_str, source=f"perception_{modality}").text
+
+        reading_res = self.reading_cortex.read(safe_text[:3000], title=context_hint or f"Percepção {modality}")
+        signal_emb = reading_res.reading_embedding
+
+        surprise = self.neurogenesis.evaluate_signal_surprise(circuit=modality, signal=signal_emb)
+        born_neurons: List[DynamicNeuron] = []
+        if surprise > 0.75:
+            reason = f"Percepção {modality} com alta surpresa ({surprise:.2f})"
+            if context_hint:
+                reason = f"{reason}: {context_hint[:40]}"
+            new_n = self.neurogenesis.trigger_neurogenesis(circuit=modality, signal=signal_emb, reason=reason)
+            born_neurons.append(new_n)
+
+        born_ids = [n.neuron_id for n in born_neurons]
+
+        summary = f"[{modality}] {context_hint or 'Percepção operacional'}: {safe_text[:140]}..."
+        ep = self.memory.record_episodic_memory(
+            modality=modality,
+            experience_summary=summary,
+            perceptual_details={
+                "modality": modality,
+                "context_hint": context_hint,
+                "surprise_score": round(surprise, 4),
+                "novelty_detected": surprise > 0.75,
+                "raw_preview": safe_text[:300],
+            },
+            emotive_valence="ALERTA" if surprise > 0.75 else "RESOLUCAO",
+            salience=0.9 if surprise > 0.75 else 0.7,
+            associated_concepts=reading_res.suggested_concepts_for_neurogenesis,
+            created_neuron_ids=born_ids,
+        )
+
+        self._update_stage()
+        self.save_state()
+
+        return {
+            "modality": modality,
+            "surprise_score": round(surprise, 4),
+            "novelty_detected": surprise > 0.75,
+            "new_neurons_born": [n.export_meta() for n in born_neurons],
+            "episodic_memory_id": ep.memory_id,
+            "developmental_stage": self.current_stage,
+            "summary": summary,
+        }
+
+    def consolidate_cognition(self, force: bool = False) -> Dict[str, Any]:
+        """Consolida memórias e processos cognitivos via sono e fortalecimento sináptico."""
+        return self.sleep_and_consolidate()
+
+    def assess_milestones(self) -> List[DevelopmentalMilestone]:
+        """Retorna a lista de marcos de desenvolvimento alcançados."""
+        return list(self.milestones)
 
     # ==================== Persistência ====================
 

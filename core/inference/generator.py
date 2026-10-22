@@ -27,14 +27,14 @@ class GenerationConfig:
 
 
 class PrefixKVCache:
-    """Small exact-prefix cache for model prompt states and final prompt logits."""
+    """Multi-entry prefix cache supporting longest common prefix lookup and KV reuse."""
 
-    def __init__(self, max_entries: int = 32) -> None:
+    def __init__(self, max_entries: int = 64) -> None:
         from collections import OrderedDict
         self.max_entries = max(1, int(max_entries))
         self._entries: Any = OrderedDict()
 
-    def get(self, token_ids: List[int]) -> Optional[Tuple[List[Tuple[np.ndarray, np.ndarray]], np.ndarray]]:
+    def get(self, token_ids: Sequence[int]) -> Optional[Tuple[List[Tuple[np.ndarray, np.ndarray]], np.ndarray]]:
         key = tuple(token_ids)
         entry = self._entries.get(key)
         if entry is None:
@@ -43,7 +43,33 @@ class PrefixKVCache:
         kvs, logits = entry
         return ([(k.copy(), v.copy()) for k, v in kvs], logits.copy())
 
-    def put(self, token_ids: List[int], kvs: List[Tuple[np.ndarray, np.ndarray]], logits: np.ndarray) -> None:
+    def find_longest_prefix(
+        self, token_ids: Sequence[int]
+    ) -> Optional[Tuple[int, List[Tuple[np.ndarray, np.ndarray]], Optional[np.ndarray]]]:
+        """
+        Finds the longest cached prefix of `token_ids`.
+        Returns (prefix_length, past_kvs_slice, logits_if_exact) or None.
+        """
+        target = tuple(token_ids)
+        best_key: Optional[Tuple[int, ...]] = None
+        best_len = 0
+
+        for key in self._entries:
+            key_len = len(key)
+            if key_len <= len(target) and target[:key_len] == key:
+                if key_len > best_len:
+                    best_len = key_len
+                    best_key = key
+
+        if best_key is None or best_len == 0:
+            return None
+
+        self._entries.move_to_end(best_key)
+        kvs, logits = self._entries[best_key]
+        kvs_copy = [(k[..., :best_len, :].copy(), v[..., :best_len, :].copy()) for k, v in kvs]
+        return (best_len, kvs_copy, logits.copy() if best_len == len(target) else None)
+
+    def put(self, token_ids: Sequence[int], kvs: List[Tuple[np.ndarray, np.ndarray]], logits: np.ndarray) -> None:
         key = tuple(token_ids)
         self._entries[key] = ([(k.copy(), v.copy()) for k, v in kvs], logits.copy())
         self._entries.move_to_end(key)
@@ -52,6 +78,9 @@ class PrefixKVCache:
 
     def clear(self) -> None:
         self._entries.clear()
+
+    def __len__(self) -> int:
+        return len(self._entries)
 
 
 class AutoregressiveGenerator:
@@ -174,10 +203,26 @@ class AutoregressiveGenerator:
 
         generated_ids: List[int] = []
         past_kvs = None
-        cached_prefix = self.prefix_cache.get(prompt_ids) if cfg.use_cache else None
         first_logits: Optional[np.ndarray] = None
-        if cached_prefix is not None:
-            past_kvs, first_logits = cached_prefix
+
+        if cfg.use_cache:
+            prefix_match = self.prefix_cache.find_longest_prefix(prompt_ids)
+            if prefix_match is not None:
+                matched_len, past_kvs, cached_logits = prefix_match
+                if matched_len == len(prompt_ids) and cached_logits is not None:
+                    first_logits = cached_logits
+                elif matched_len < len(prompt_ids):
+                    suffix_tokens = prompt_ids[matched_len:]
+                    step_input = np.array([suffix_tokens], dtype=np.int64)
+                    logits, past_kvs = self.model.forward(
+                        step_input,
+                        past_kvs=past_kvs,
+                        use_cache=True,
+                        capture_diagnostics=capture_diagnostics,
+                    )
+                    first_logits = logits.data[0, -1, :]
+                    if past_kvs is not None:
+                        self.prefix_cache.put(prompt_ids, past_kvs, first_logits)
 
         for step in range(max_new_tokens):
             if should_cancel is not None and should_cancel():
@@ -229,6 +274,9 @@ class AutoregressiveGenerator:
             # here prevents unconstrained tokens from being appended afterward.
             if next_id == self.tokenizer.token_to_id.get("[/TOOL_CALL]"):
                 break
+
+        if cfg.use_cache and past_kvs is not None and generated_ids:
+            self.prefix_cache.put(prompt_ids + generated_ids, past_kvs, next_logits)
 
     def generate_text(
         self,
