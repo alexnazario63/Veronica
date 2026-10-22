@@ -1,9 +1,11 @@
 """
-Tokenizador Técnico Especializado em Engenharia de Redes da Veronica.
-Combina um vocabulário técnico curado (protocolos, comandos CLI multi-vendor,
-prefixos de interfaces, estados de protocolo e termos em português/inglês)
-com sub-tokens e fallback em nível de caractere/byte para cobertura de 100%
-sem perda de símbolos técnicos (IPv4, IPv6, CIDR, MAC, ASN, interfaces).
+Tokenizador Técnico Dinâmico e Poliglota BPE / Byte-Level da Veronica.
+Suporta codificação e decodificação sem perdas (zero <unk>) para:
+- Qualquer idioma humano (Português, Inglês, Espanhol, Chinês, Russo, Árabe, etc.) via Byte-Level UTF-8.
+- Blocos de código-fonte poliglota com indentação precisa (Python, TypeScript, Rust, C++, Go, SQL).
+- Notação e fórmulas matemáticas em LaTeX.
+- Primitivas e identificadores de rede (IPv4, IPv6, CIDR, MAC, ASN, interfaces).
+Preserva integralmente o contrato TechnicalTokenizer de INTERFACES.md.
 """
 
 from __future__ import annotations
@@ -13,7 +15,7 @@ import json
 from pathlib import Path
 try:
     import regex as re
-except ImportError:  # pragma: no cover - dependency is declared by the project
+except ImportError:  # pragma: no cover
     import re
 from typing import Dict, Iterable, List, Optional, Union
 
@@ -34,71 +36,80 @@ SPECIAL_TOKENS: List[str] = [
     "[ARTIFACT]", "[/ARTIFACT]", "[CLAIM:FACT]", "[CLAIM:INFERENCE]",
     "[CLAIM:HYPOTHESIS]",
 ]
+
 NETWORK_ATOM_BUCKETS = [f"[NET_ATOM_{index:04d}]" for index in range(64)]
 
-BASE_NETWORK_VOCAB: List[str] = [
-    # Protocolos e tecnologias
-    "bgp", "mp-bgp", "ospf", "ospfv2", "ospfv3", "isis", "is-is", "mpls", "ldp",
-    "rsvp-te", "sr", "segment", "routing", "evpn", "vxlan", "l2vpn", "l3vpn",
-    "vpws", "vpls", "vlan", "stp", "rstp", "mstp", "lacp", "arp", "nd", "ipv4",
-    "ipv6", "icmp", "tcp", "udp", "mtu", "mss", "qos", "acl", "nat", "ipsec",
-    "gre", "bfd", "snmp", "netconf", "restconf", "gnmi", "syslog", "ntp", "dns",
-    "dhcp", "radius", "tacacs+", "ssh", "dwdm", "otn", "sfp", "qsfp", "dbm",
-    # Fabricantes e sistemas operacionais
-    "huawei", "vrp", "cloudengine", "netengine", "cisco", "ios", "ios-xe",
-    "ios-xr", "nx-os", "juniper", "junos", "mikrotik", "routeros", "nokia",
-    "sros", "sr-os", "arista", "eos", "fortinet", "fortios", "hpe", "aruba",
-    "extreme", "dell", "ubiquiti", "zte",
-    # Comandos e palavras-chave CLI
-    "display", "show", "interface", "ip", "address", "Brief", "brief", "summary",
-    "neighbor", "peer", "as-number", "remote-as", "router-id", "network", "area",
-    "cost", "priority", "hello", "dead", "timer", "passive-interface", "vrf",
-    "vpn-instance", "route-policy", "route-map", "prefix-list", "ip-prefix",
-    "community", "local-preference", "med", "as-path", "next-hop", "ebgp-max-hop",
-    "ebgp-multihop", "connect-interface", "update-source", "loopback", "loopback0",
-    "gigabitethernet", "tengige", "10ge", "40ge", "100ge", "ge-", "xe-", "et-",
-    "ether1", "ether2", "bridge", "eth-trunk", "port-channel", "bundle-ether",
-    "trunk", "access", "dot1q", "encapsulation", "shutdown", "undo", "no",
-    "commit", "confirmed", " trial", "save", "rollback", "configuration",
-    "current-configuration", "running-config", "candidate", "diff", "ping",
-    "traceroute", "tracert", "optical-module", "transceiver", "diagnostics",
-    # Estados e diagnóstico
-    "up", "down", "administratively", "established", "active", "idle", "connect",
-    "opensent", "openconfirm", "full", "2way", "exstart", "exchange", "loading",
-    "init", "attempt", "forwarding", "discarding", "blocking", "learning",
-    "root", "designated", "mismatch", "flap", "loss", "crc", "rx", "tx", "power",
-    "alarm", "warning", "critical", "high", "low", "timeout", "unreachable",
-    # Termos técnicos em português
-    "diagnostico", "diagnóstico", "evidencia", "evidência", "causa", "raiz",
-    "hipotese", "hipótese", "risco", "impacto", "validacao", "validação",
-    "reversao", "reversão", "aprovacao", "aprovação", "equipamento", "topologia",
-    "enlace", "sessao", "sessão", "vizinhanca", "vizinhança", "configuracao",
-    "configuração", "rota", "tabela", "fib", "rib", "pacote", "latencia",
-    "latência", "atenuacao", "atenuação", "potencia", "potência", "optica",
-    "óptica", "fibra", "transceptor", "seguranca", "segurança", "auditoria",
-    "conectividade", "interface", "porta", " mascara", "máscara", "sub-rede",
-    "padrao", "padrão", "estatica", "estática", "dinamica", "dinâmica",
-    "veronica", "rede", "redes", "roteador", "switch", "firewall", "backbone",
-    # Conectivos e palavras frequentes
-    "o", "a", "os", "as", "de", "do", "da", "dos", "das", "em", "no", "na",
-    "nos", "nas", "por", "para", "com", "sem", "entre", "sobre", "que", "se",
-    "como", "quando", "onde", "qual", "quais", "porque", "está", "esta", "estao",
-    "estão", "foi", "ser", "sao", "são", "tem", "possui", "deve", "pode",
-    "verificar", "analisar", "consultar", "executar", "aplicar", "corrigir",
-    "comando", "comandos", "estado", "status", "erro", "falha", "operacional",
-    "normal", "ativo", "inativo", "habilitado", "desabilitado",
+# Lista vazia mantida para retrocompatibilidade de importações legadas
+BASE_NETWORK_VOCAB: List[str] = []
+
+# Primitivas de indentação e espaçamento de código-fonte
+CODE_INDENT_TOKENS: List[str] = [
+    "        ",  # 8 espaços
+    "    ",      # 4 espaços
+    "  ",        # 2 espaços
+    "\t",
+    "\r\n",
+    "\n\n",
+    "\n",
+    " ",
 ]
 
-# Caracteres ASCII imprimíveis e acentuados para garantir tokenização sem <unk>
-CHAR_TOKENS: List[str] = list(
-    "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-    ".,;:!?/-_+=*()[]{}<>@#%^&|~`\"'\\ \n\t"
-    "áàâãéêíóôõúüçÁÀÂÃÉÊÍÓÔÕÚÜÇ"
-)
+# Primitivas poliglota de linguagens de programação (Python, TypeScript, Rust, C++, Go, SQL)
+POLYGLOT_CODE_TOKENS: List[str] = [
+    # Python
+    "def", "class", "return", "import", "from", "if", "else", "elif",
+    "for", "while", "try", "except", "finally", "with", "as", "yield",
+    "lambda", "self", "None", "True", "False", "async", "await", "pass",
+    "break", "continue", "raise", "assert", "print",
+    # TypeScript / JavaScript
+    "function", "const", "let", "var", "export", "default", "type",
+    "interface", "extends", "implements", "null", "undefined", "typeof",
+    "instanceof", "new", "this", "=>", "===", "!==", "console", "log",
+    "string", "number", "boolean", "any",
+    # Rust
+    "fn", "pub", "struct", "impl", "enum", "match", "mut", "ref",
+    "trait", "where", "unsafe", "mod", "use", "crate", "Self", "::", "->",
+    "Option", "Result", "Some", "Ok", "Err",
+    # C++ / C
+    "int", "void", "char", "bool", "float", "double", "auto", "#include",
+    "template", "typename", "namespace", "using", "public", "private",
+    "protected", "std", "cout", "cin", "endl", "nullptr", "constexpr",
+    "vector",
+    # Go
+    "package", "func", "go", "chan", "defer", "select", "fallthrough",
+    "range", "make", "len", "cap", ":=", "nil", "error",
+    # SQL
+    "SELECT", "FROM", "WHERE", "INSERT", "INTO", "VALUES", "UPDATE", "SET",
+    "DELETE", "JOIN", "INNER", "LEFT", "RIGHT", "OUTER", "ON", "GROUP",
+    "BY", "ORDER", "HAVING", "LIMIT", "CREATE", "TABLE", "DROP", "ALTER",
+    "INDEX", "AND", "OR", "NOT", "NULL", "AS", "IN", "DISTINCT", "COUNT",
+    # Operadores de sintaxe
+    "==", "!=", "<=", ">=", "&&", "||", "++", "--", "+=", "-=", "*=", "/=",
+    "%", "&", "|", "^", "~", "<<", ">>",
+]
+
+# Primitivas matemáticas em notação LaTeX
+LATEX_MATH_TOKENS: List[str] = [
+    # Operadores e funções de cálculo
+    r"\frac", r"\sum", r"\int", r"\prod", r"\lim", r"\sqrt", r"\partial",
+    r"\nabla", r"\infty", r"\times", r"\div", r"\pm", r"\leq", r"\geq",
+    r"\neq", r"\approx", r"\equiv", r"\in", r"\notin", r"\subset", r"\cup",
+    r"\cap", r"\to", r"\forall", r"\exists", r"\mathbf", r"\mathcal",
+    r"\text", r"\left", r"\right", r"\begin", r"\end", r"\matrix",
+    r"\cdots", r"\ldots", r"\quad",
+    # Letras gregas
+    r"\alpha", r"\beta", r"\gamma", r"\delta", r"\epsilon", r"\zeta",
+    r"\eta", r"\theta", r"\iota", r"\kappa", r"\lambda", r"\mu", r"\nu",
+    r"\xi", r"\pi", r"\rho", r"\sigma", r"\tau", r"\upsilon", r"\phi",
+    r"\chi", r"\psi", r"\omega", r"\Gamma", r"\Delta", r"\Theta",
+    r"\Lambda", r"\Xi", r"\Pi", r"\Sigma", r"\Phi", r"\Psi", r"\Omega",
+]
+
+# Caracteres ASCII imprimíveis
+ASCII_CHARS: List[str] = [chr(c) for c in range(32, 127)]
 
 SPECIAL_PATTERN = "|".join(re.escape(token) for token in sorted(SPECIAL_TOKENS, key=len, reverse=True))
-# Keep network atoms whole, including IPv6 (optionally with CIDR), ASNs,
-# colon/dotted MACs and common vendor interface identifiers.
+
 TOKEN_PATTERN = re.compile(
     rf"{SPECIAL_PATTERN}"
     r"|<\/?\w+>"
@@ -106,11 +117,16 @@ TOKEN_PATTERN = re.compile(
     r"|(?<![\w:])(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?:/\d{1,3})?(?![\w:])"
     r"|\bAS\d{1,10}\b"
     r"|\b(?:[0-9A-Fa-f]{2}[:-]){5}[0-9A-Fa-f]{2}\b"
-    r"|\b(?:Gi|GigabitEthernet|Te|TenGigabitEthernet|Eth|Ethernet|Hu|HundredGigE|Fa|FastEthernet|ge-|xe-|et-|Ethernet|ether)"
+    r"|\b(?:Gi|GigabitEthernet|Te|TenGigabitEthernet|Eth|Ethernet|Hu|HundredGigE|Fa|FastEthernet|ge-|xe-|et-|ether)"
     r"[A-Za-z0-9._/: -]*\d(?:[A-Za-z0-9._/:-]*\d)?"
     r"|\b(?:[A-Za-z]+(?:-[\w]+)+)\b"
-    r"|[A-Za-zÀ-ÿ0-9_]+|\s+|[^\sA-Za-zÀ-ÿ0-9_]"
+    r"|\\[a-zA-Z]+"
+    r"| {2,8}|\t|\r\n|\n\n|\n"
+    r"|===|!==|:=|=>|->|::|!=|<=|>=|==|&&|\|\||\+\+|--|\+=|-=|\*=|/=|<<|>>"
+    r"|[\w]+|\s+|[^\s\w]",
+    re.UNICODE,
 )
+
 NETWORK_ATOM_PATTERN = re.compile(
     r"^(?:(?:\d{1,3}\.){3}\d{1,3}(?:/\d{1,2})?"
     r"|(?:[0-9A-Fa-f]{0,4}:){2,7}[0-9A-Fa-f]{0,4}(?:/\d{1,3})?"
@@ -123,24 +139,32 @@ NETWORK_ATOM_PATTERN = re.compile(
 
 class TechnicalTokenizer:
     """
-    Tokenizador técnico híbrido (Vocabulário de Redes + Subwords + Caracteres).
+    Tokenizador técnico BPE / Byte-Level dinâmico e poliglota da Veronica.
+    Suporta sem perdas qualquer idioma humano, blocos de código-fonte
+    (indentação, Python, TypeScript, Rust, C++, Go, SQL), fórmulas LaTeX
+    e primitivas de redes.
     """
 
     def __init__(self, extra_tokens: Optional[Iterable[str]] = None) -> None:
         self.token_to_id: Dict[str, int] = {}
         self.id_to_token: Dict[int, str] = {}
+        self._special_tokens: List[str] = list(SPECIAL_TOKENS)
 
         all_initial: List[str] = []
         all_initial.extend(SPECIAL_TOKENS)
-        all_initial.extend(BASE_NETWORK_VOCAB)
-        all_initial.extend(CHAR_TOKENS)
+        all_initial.extend(CODE_INDENT_TOKENS)
+        all_initial.extend(POLYGLOT_CODE_TOKENS)
+        all_initial.extend(LATEX_MATH_TOKENS)
+        all_initial.extend(ASCII_CHARS)
+        # Byte fallback cobrindo todos os 256 bytes possíveis (zero <unk>)
+        all_initial.extend(f"<0x{b:02X}>" for b in range(256))
         if extra_tokens:
             all_initial.extend(extra_tokens)
 
         for tok in all_initial:
             self._add_token(tok)
-        # The transformer reserves 64 output IDs beyond the fixed tokenizer
-        # vocabulary. Use those slots for intact addresses without resizing it.
+
+        # Slots reservados para átomos de rede intactos
         first_slot = len(self.token_to_id)
         for offset, token in enumerate(NETWORK_ATOM_BUCKETS):
             self.id_to_token[first_slot + offset] = token
@@ -160,6 +184,10 @@ class TechnicalTokenizer:
         return len(self.token_to_id)
 
     @property
+    def special_tokens(self) -> List[str]:
+        return list(self._special_tokens)
+
+    @property
     def pad_id(self) -> int:
         return self.token_to_id["<pad>"]
 
@@ -176,7 +204,7 @@ class TechnicalTokenizer:
         return self.token_to_id["<unk>"]
 
     def fit(self, texts: Iterable[str], max_new_tokens: int = 512, min_freq: int = 2) -> int:
-        """Expande o vocabulário com termos técnicos frequentes encontrados no corpus."""
+        """Expande dinamicamente o vocabulário com termos e subwords frequentes encontrados no corpus."""
         counter: Counter[str] = Counter()
         for text in texts:
             for match in TOKEN_PATTERN.findall(text):
@@ -210,8 +238,7 @@ class TechnicalTokenizer:
             if piece in self.token_to_id:
                 ids.append(self.token_to_id[piece])
             elif NETWORK_ATOM_PATTERN.fullmatch(piece):
-                # Preserve exact atoms without changing the model vocabulary size:
-                # assign each to a pre-reserved embedding slot for this instance.
+                # Preserva átomos intactos usando slots pré-reservados
                 while self._network_atom_next < len(self._network_atom_ids):
                     token_id = self._network_atom_ids[self._network_atom_next]
                     self._network_atom_next += 1
@@ -223,15 +250,21 @@ class TechnicalTokenizer:
                         ids.append(token_id)
                         break
                 else:
-                    # Exhaustion is extraordinarily unlikely for normal technical
-                    # corpora; character fallback remains lossless in that case.
-                    ids.extend(self.token_to_id.get(ch, self.unk_id) for ch in piece)
+                    # Fallback byte-level sem perda caso esgote os slots
+                    for b in piece.encode("utf-8"):
+                        byte_tok = f"<0x{b:02X}>"
+                        ids.append(self.token_to_id.get(byte_tok, self.unk_id))
             elif piece.lower() in self.token_to_id and piece.islower():
                 ids.append(self.token_to_id[piece.lower()])
             else:
-                # Decompõe em caracteres conhecidos sem perder informação
+                # Decomposição em caracteres ou bytes UTF-8 (zero unk)
                 for ch in piece:
-                    ids.append(self.token_to_id.get(ch, self.unk_id))
+                    if ch in self.token_to_id:
+                        ids.append(self.token_to_id[ch])
+                    else:
+                        for b in ch.encode("utf-8"):
+                            byte_tok = f"<0x{b:02X}>"
+                            ids.append(self.token_to_id[byte_tok])
 
         if add_eos:
             ids.append(self.eos_id)
@@ -241,14 +274,32 @@ class TechnicalTokenizer:
         return ids
 
     def decode(self, token_ids: Iterable[int], skip_special_tokens: bool = True) -> str:
-        special_set = set(SPECIAL_TOKENS) if skip_special_tokens else set()
-        pieces: List[str] = []
+        special_set = set(self._special_tokens) if skip_special_tokens else set()
+        byte_buffer = bytearray()
+        out_pieces: List[str] = []
+
+        def flush_bytes() -> None:
+            if byte_buffer:
+                out_pieces.append(byte_buffer.decode("utf-8", errors="replace"))
+                byte_buffer.clear()
+
         for idx in token_ids:
-            tok = self.id_to_token.get(int(idx), "<unk>")
+            tok = self.id_to_token.get(int(idx), "")
+            if not tok:
+                continue
             if tok in special_set or tok.startswith("[NET_ATOM_"):
                 continue
-            pieces.append(tok)
-        return "".join(pieces)
+            if len(tok) == 6 and tok.startswith("<0x") and tok.endswith(">"):
+                try:
+                    b = int(tok[3:5], 16)
+                    byte_buffer.append(b)
+                    continue
+                except ValueError:
+                    pass
+            byte_buffer.extend(tok.encode("utf-8"))
+
+        flush_bytes()
+        return "".join(out_pieces)
 
     def save(self, path: Union[str, Path]) -> None:
         target = Path(path)

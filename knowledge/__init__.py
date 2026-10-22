@@ -1,9 +1,13 @@
-"""Pacote knowledge — Sistema de Conhecimento Especializado da Veronica."""
+"""Pacote knowledge — Sistema de Conhecimento Especializado e Dinâmico da Veronica."""
 
 from knowledge.sources import (
     KnowledgeDocument,
     NETWORKING_KNOWLEDGE_DOMAINS,
+    KNOWLEDGE_DOMAINS,
     OFFICIAL_INITIAL_DOCUMENTS,
+    DynamicDomainRegistry,
+    DynamicKnowledgeCatalog,
+    PersistentKnowledgeCatalogEngine,
     get_documents_by_domain,
     verify_all_7_domains_coverage,
 )
@@ -18,16 +22,27 @@ from knowledge.ingestion import (
     chunk_large_document,
     OfficialDocumentationSearchConnector,
     KnowledgeIngestor,
+    SecretScrubber,
+    PromptInjectionGuard,
     SanitizedUntrustedText,
     sanitize_untrusted_text,
     sanitize_device_output,
 )
 from knowledge.retrieval import HybridRAGEngine
+from knowledge.epistemic import (
+    EpistemicTag,
+    DynamicEpistemicClassifier,
+    classify_epistemic_statement,
+)
 
 __all__ = [
     "KnowledgeDocument",
     "NETWORKING_KNOWLEDGE_DOMAINS",
+    "KNOWLEDGE_DOMAINS",
     "OFFICIAL_INITIAL_DOCUMENTS",
+    "DynamicDomainRegistry",
+    "DynamicKnowledgeCatalog",
+    "PersistentKnowledgeCatalogEngine",
     "get_documents_by_domain",
     "verify_all_7_domains_coverage",
     "scrub_secrets",
@@ -40,9 +55,13 @@ __all__ = [
     "chunk_large_document",
     "OfficialDocumentationSearchConnector",
     "KnowledgeIngestor",
+    "SecretScrubber",
+    "PromptInjectionGuard",
     "SanitizedUntrustedText",
     "sanitize_untrusted_text",
     "sanitize_device_output",
     "HybridRAGEngine",
+    "EpistemicTag",
+    "DynamicEpistemicClassifier",
+    "classify_epistemic_statement",
 ]
-

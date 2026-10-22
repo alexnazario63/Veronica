@@ -7,44 +7,11 @@ import re
 from typing import Any, Dict, List, Mapping, Optional, Union
 
 from core.contracts import ToolSafetyTier
+from core.agent.tools.base import AgentTool
 
 
-class CodebaseInspectorTool:
+class CodebaseInspectorTool(AgentTool):
     """Inspeciona sintaxe via AST, lê arquivos do repositório, busca símbolos e apoia refatoração."""
-
-    name: str = "codebase_inspector"
-    description: str = (
-        "Inspects codebase, analyzes syntax trees using python ast, validates syntax across languages, "
-        "reads repository files, and searches symbols to support surgical code generation and refactoring."
-    )
-    tier: ToolSafetyTier = ToolSafetyTier.TIER_0_READ_ONLY
-    is_safe_read_only: bool = True
-    input_schema: Dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "action": {
-                "type": "string",
-                "enum": ["validate_syntax", "inspect_ast", "read_file", "search_symbols", "list_files"],
-                "description": "Inspection action to execute",
-            },
-            "code": {"type": "string", "description": "Source code snippet for syntax validation or AST parsing"},
-            "language": {"type": "string", "description": "Programming language (python, typescript, rust, go, etc.)"},
-            "file_path": {"type": "string", "description": "Relative or absolute file path to read/inspect"},
-            "query": {"type": "string", "description": "Symbol name or search query"},
-            "start_line": {"type": "integer", "description": "Starting line number (1-indexed)"},
-            "end_line": {"type": "integer", "description": "Ending line number (inclusive)"},
-        },
-    }
-    output_schema: Dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "status": {"type": "string", "enum": ["ok", "error"]},
-            "action": {"type": "string"},
-            "result": {"type": "any"},
-            "valid": {"type": "boolean"},
-            "error": {"type": "string"},
-        },
-    }
 
     def __init__(
         self,
@@ -54,19 +21,45 @@ class CodebaseInspectorTool:
         workspace_root: Optional[Union[str, Path]] = None,
         **kwargs: Any,
     ) -> None:
-        self.name = name
-        if isinstance(tier, ToolSafetyTier):
-            self.tier = tier
-        elif isinstance(tier, str) and hasattr(ToolSafetyTier, tier):
-            self.tier = getattr(ToolSafetyTier, tier)
-        else:
-            self.tier = ToolSafetyTier.TIER_0_READ_ONLY
-
-        if description:
-            self.description = description
+        desc = description or (
+            "Inspects codebase, analyzes syntax trees using python ast, validates syntax across languages, "
+            "reads repository files, and searches symbols to support surgical code generation and refactoring."
+        )
+        super().__init__(
+            name=name,
+            tier=tier,
+            description=desc,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "action": {
+                        "type": "string",
+                        "enum": ["validate_syntax", "inspect_ast", "read_file", "search_symbols", "list_files"],
+                        "description": "Inspection action to execute",
+                    },
+                    "code": {"type": "string", "description": "Source code snippet for syntax validation or AST parsing"},
+                    "language": {"type": "string", "description": "Programming language (python, typescript, rust, go, etc.)"},
+                    "file_path": {"type": "string", "description": "Relative or absolute file path to read/inspect"},
+                    "query": {"type": "string", "description": "Symbol name or search query"},
+                    "start_line": {"type": "integer", "description": "Starting line number (1-indexed)"},
+                    "end_line": {"type": "integer", "description": "Ending line number (inclusive)"},
+                },
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["ok", "error"]},
+                    "action": {"type": "string"},
+                    "result": {"type": "any"},
+                    "valid": {"type": "boolean"},
+                    "error": {"type": "string"},
+                },
+            },
+            is_safe_read_only=True,
+            **kwargs,
+        )
         self.workspace_root = Path(workspace_root).resolve() if workspace_root else Path.cwd().resolve()
         self.handler = self.execute
-        self.is_safe_read_only = True
 
     def validate_syntax(self, code: str, language: str = "python") -> Dict[str, Any]:
         """Valida a correção sintática do código fornecido."""
@@ -105,7 +98,6 @@ class CodebaseInspectorTool:
         matching = {")": "(", "}": "{", "]": "["}
         lines = code.splitlines()
         for idx, line in enumerate(lines, 1):
-            # Ignora strings e comentários simples na verificação de parênteses
             in_str = False
             str_char = ""
             for ch in line:

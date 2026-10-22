@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import base64
 from datetime import datetime, timezone
+from pathlib import Path
 import html
 import io
 import json
@@ -55,10 +56,10 @@ PROMPT_INJECTION_PATTERNS: List[Tuple[str, re.Pattern[str]]] = [
 
 SECRET_REDACTION_PATTERNS: List[re.Pattern[str]] = [
     re.compile(
-        r"((?:password|secret|key-string|wpa-passphrase|community|pre-shared-key|cipher|passphrase|auth-key)\s+)([^\s\n\"']+)",
+        r"((?:password|secret|key-string|wpa-passphrase|community|pre-shared-key|cipher|passphrase|auth-key)\s*(?:=\s*|:\s*|\s+)\s*['\"]?)([^\s\n'\"]+)(['\"]?)",
         re.IGNORECASE,
     ),
-    re.compile(r"(api[_-]?key\s*[:=]\s*)([^\s\n\"']+)", re.IGNORECASE),
+    re.compile(r"(api[_-]?key\s*[:=]\s*['\"]?)([^\s\n'\"]+)(['\"]?)", re.IGNORECASE),
 ]
 
 CLI_COMMAND_REGEX = re.compile(
@@ -86,10 +87,16 @@ def scrub_secrets(text: str) -> Tuple[str, int]:
     redacted_count = 0
     cleaned = text
     for pattern in SECRET_REDACTION_PATTERNS:
-        cleaned, count = pattern.subn(r"\1[REDACTED_SECRET]", cleaned)
-        redacted_count += count
+        def _repl(m: re.Match[str]) -> str:
+            nonlocal redacted_count
+            val = m.group(2)
+            if val == "[REDACTED_SECRET]":
+                return m.group(0)
+            redacted_count += 1
+            closing = m.group(3) if len(m.groups()) >= 3 and m.group(3) else ""
+            return f"{m.group(1)}[REDACTED_SECRET]{closing}"
+        cleaned = pattern.sub(_repl, cleaned)
     return cleaned, redacted_count
-
 
 def detect_prompt_injection(text: str) -> Tuple[bool, List[str]]:
     """
@@ -1143,9 +1150,19 @@ def fetch_web_page_content(url: str, timeout: float = 3.0, max_bytes: int = 2_00
 
 class KnowledgeIngestor:
     """
-    Processa e valida novos documentos técnicos sem alterar os pesos neurais do modelo.
-    Suporta TXT, Markdown, HTML, JSON, XML, DOCX, PDF e configurações CLI (.cfg, .conf, .rsc).
+    Motor de Ingestão Autônoma sob Demanda da Veronica.
+    - Suporta TXT, Markdown, HTML, JSON, XML, DOCX, PDF e arquivos de código-fonte (.py, .rs, .ts, etc.)
+    - Indexa dinamicamente novos documentos, códigos e respostas validadas no BM25S e no índice vetorial em tempo real.
+    - Todo conteúdo passa rigorosamente por SecretScrubber e PromptInjectionGuard.
     """
+
+    def __init__(
+        self,
+        rag_engine: Optional[Any] = None,
+        catalog: Optional[Any] = None,
+    ) -> None:
+        self.rag_engine = rag_engine
+        self.catalog = catalog
 
     def ingest_document(
         self,
@@ -1167,6 +1184,12 @@ class KnowledgeIngestor:
         domain: str = "routing",
         max_chunk_chars: int = 1200,
         overlap_chars: int = 150,
+        organization: str = "",
+        language_or_framework: str = "",
+        topic_category: str = "general",
+        metadata_extra: Optional[Dict[str, Any]] = None,
+        sync_to_catalog: bool = True,
+        sync_to_rag: bool = True,
     ) -> Dict[str, Any]:
         normalized = normalize_format_content(raw_content, file_format)
         from knowledge.ingestion.sanitizer import sanitize_untrusted_text
@@ -1215,7 +1238,30 @@ class KnowledgeIngestor:
             security_quarantined=injected,
             quarantine_reason="; ".join(injection_reasons),
             domain=domain,
+            organization=organization,
+            language_or_framework=language_or_framework,
+            topic_category=topic_category,
+            metadata_extra=metadata_extra or {},
         )
+
+        # Persistência no catálogo se solicitado
+        if sync_to_catalog:
+            try:
+                from knowledge.sources.catalog import DynamicKnowledgeCatalog
+                target_catalog = self.catalog or DynamicKnowledgeCatalog.get_default()
+                target_catalog.add_document(doc)
+            except Exception:
+                pass
+
+        # Indexação em tempo real no BM25S e no índice vetorial do HybridRAGEngine
+        if sync_to_rag and self.rag_engine is not None and not injected:
+            try:
+                if hasattr(self.rag_engine, "index_document_in_realtime"):
+                    self.rag_engine.index_document_in_realtime(doc)
+                else:
+                    self.rag_engine.add_document(doc, recompute_stats=True, compute_embedding=True)
+            except Exception:
+                pass
 
         return {
             "document": doc,
@@ -1227,3 +1273,129 @@ class KnowledgeIngestor:
             "neural_weights_modified": False,
         }
 
+    def ingest_file(
+        self,
+        file_path: Union[str, Path],
+        vendor: Optional[str] = None,
+        organization: Optional[str] = None,
+        domain: Optional[str] = None,
+        reliability_score: float = 0.85,
+        is_official: bool = False,
+    ) -> Dict[str, Any]:
+        """Lê e ingere arquivo de código, markdown, PDF ou configuração sanitizando segredos e injeções."""
+        path = Path(file_path)
+        if not path.exists():
+            raise FileNotFoundError(f"Arquivo não encontrado: {path}")
+
+        ext = path.suffix.lower().lstrip(".")
+        is_binary = ext in ("pdf", "docx")
+
+        if is_binary:
+            raw_content: Union[str, bytes] = path.read_bytes()
+        else:
+            raw_content = path.read_text(encoding="utf-8", errors="replace")
+
+        # Infeção de metadados dinâmicos com base na extensão
+        lang_map = {
+            "py": "Python",
+            "rs": "Rust",
+            "ts": "TypeScript",
+            "js": "JavaScript",
+            "go": "Go",
+            "c": "C",
+            "cpp": "C++",
+            "sh": "Shell",
+            "sql": "SQL",
+        }
+        lang = lang_map.get(ext, "")
+        doc_domain = domain or ("systems" if lang else "general")
+        doc_vendor = vendor or ("OpenSource" if lang else "Generic")
+
+        return self.ingest_document(
+            title=f"Source: {path.name}",
+            raw_content=raw_content,
+            file_format=ext or "txt",
+            vendor=doc_vendor,
+            organization=organization or "Community",
+            language_or_framework=lang,
+            domain=doc_domain,
+            source_uri=f"file://{path.resolve()}",
+            reliability_score=reliability_score,
+            is_official=is_official,
+        )
+
+    def ingest_code_repository(
+        self,
+        repo_path: Union[str, Path],
+        extensions: Optional[List[str]] = None,
+        max_files: int = 500,
+    ) -> Dict[str, Any]:
+        """Indexa dinamicamente arquivos de código e documentação de um repositório."""
+        root = Path(repo_path)
+        if not root.is_dir():
+            raise NotADirectoryError(f"Caminho não é diretório: {root}")
+
+        allowed_exts = set(extensions or ["py", "rs", "ts", "js", "md", "json", "yaml", "yml", "cfg", "conf", "rsc"])
+        ignored_dirs = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache", ".ruff_cache", "build", "dist"}
+
+        scanned = 0
+        ingested = 0
+        quarantined = 0
+        total_redactions = 0
+        docs: List[KnowledgeDocument] = []
+
+        for p in root.rglob("*"):
+            if scanned >= max_files:
+                break
+            if p.is_dir() or any(part in ignored_dirs for part in p.parts):
+                continue
+
+            ext = p.suffix.lower().lstrip(".")
+            if ext not in allowed_exts:
+                continue
+
+            scanned += 1
+            try:
+                res = self.ingest_file(p)
+                doc = res["document"]
+                docs.append(doc)
+                ingested += 1
+                total_redactions += res["secrets_redacted"]
+                if res["security_quarantined"]:
+                    quarantined += 1
+            except Exception:
+                continue
+
+        return {
+            "files_scanned": scanned,
+            "files_ingested": ingested,
+            "quarantined_count": quarantined,
+            "total_secrets_redacted": total_redactions,
+            "documents": docs,
+        }
+
+    def ingest_validated_response(
+        self,
+        query: str,
+        response: str,
+        source: str = "assistant_validated",
+        epistemic_tag: str = "VERIFIED_FACT",
+        domain: str = "general",
+        vendor: str = "General",
+        organization: str = "Veronica",
+        reliability_score: float = 0.95,
+    ) -> Dict[str, Any]:
+        """Indexa respostas validadas de alta confiança no catálogo e no RAG em tempo real."""
+        combined = "## Query: " + str(query) + "\n\n### Validated Answer:\n" + str(response)
+        return self.ingest_document(
+            title=f"Validated Answer: {query[:60]}",
+            raw_content=combined,
+            file_format="md",
+            vendor=vendor,
+            organization=organization,
+            domain=domain,
+            source_uri=f"answer://{source}",
+            reliability_score=reliability_score,
+            is_official=True,
+            metadata_extra={"epistemic_tag": epistemic_tag, "validated_query": query},
+        )

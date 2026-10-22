@@ -70,6 +70,7 @@ class DynamicNeuron(Neuron):
         # Estágios ontogenéticos do neurônio
         self.developmental_stage = "NEONATAL"
         self.firing_count = 0
+        self.idle_cycles = 0
         self.synaptic_strength = 1.0
         self.myelination_score = 0.15  # Começa jovem/imaturo
         self.last_activated_at: Optional[str] = None
@@ -127,6 +128,7 @@ class DynamicNeuron(Neuron):
         Conforme dispara mais vezes e de forma relevante, aumenta sua mielinização e força sináptica.
         """
         self.firing_count += 1
+        self.idle_cycles = 0
         self.last_activated_at = datetime.now(timezone.utc).isoformat()
         if context_concept and context_concept not in self.co_activated_concepts:
             self.co_activated_concepts.append(context_concept)
@@ -183,6 +185,7 @@ class DynamicNeuron(Neuron):
             "developmental_stage": self.developmental_stage,
             "activation_fn": self.activation_name,
             "firing_count": self.firing_count,
+            "idle_cycles": self.idle_cycles,
             "synaptic_strength": float(self.synaptic_strength),
             "myelination_score": float(self.myelination_score),
             "coords_3d": list(self.coords_3d),
@@ -212,6 +215,7 @@ class DynamicNeuron(Neuron):
         neuron.birth_timestamp = data.get("birth_timestamp", neuron.birth_timestamp)
         neuron.developmental_stage = data.get("developmental_stage", "NEONATAL")
         neuron.firing_count = int(data.get("firing_count", 0))
+        neuron.idle_cycles = int(data.get("idle_cycles", 0))
         neuron.synaptic_strength = float(data.get("synaptic_strength", 1.0))
         neuron.myelination_score = float(data.get("myelination_score", 0.15))
         neuron.last_activated_at = data.get("last_activated_at")
@@ -413,9 +417,13 @@ class NeurogenesisEngine:
         circuit: Optional[NeurogenesisCircuit] = None,
         d_model: int = 48,
         storage_dir: Optional[Path | str] = None,
+        tau_novelty: float = 0.75,
+        inactivity_prune_cycles: int = 1000,
     ) -> None:
         self.circuit = circuit if circuit is not None else NeurogenesisCircuit(d_model=d_model)
-        self.novelty_threshold: float = 0.45
+        self.tau_novelty: float = tau_novelty
+        self.novelty_threshold: float = tau_novelty
+        self.inactivity_prune_cycles: int = inactivity_prune_cycles
         self.birth_history: List[Dict[str, Any]] = []
         self.storage_dir = Path(storage_dir) if storage_dir else None
         self._circuit_file = (self.storage_dir / "veronica_neurogenesis_circuit.json") if self.storage_dir else None
@@ -521,17 +529,19 @@ class NeurogenesisEngine:
         )
         return born[0]
 
-    def prune_idle_synapses(self, inactivity_threshold_cycles: int = 50) -> int:
+    def prune_idle_synapses(self, inactivity_threshold_cycles: int = 1000) -> int:
         """
         Poda sinapses e conexões ociosas ou enfraquecidas por desuso prolongado (plasticidade retrógrada).
+        Critério de poda: neurônios com ciclos inativos >= inactivity_threshold_cycles que não
+        estejam nos estágios protegidos ('SPECIALIZED', 'MATURE').
         """
         initial_count = len(self.circuit.neurons)
         retained = [
             n for n in self.circuit.neurons
-            if n.firing_count > 0 or n.developmental_stage in ("SPECIALIZED", "MATURE")
+            if getattr(n, "idle_cycles", 0) < inactivity_threshold_cycles or n.developmental_stage in ("SPECIALIZED", "MATURE")
         ]
         pruned = initial_count - len(retained)
-        if pruned > 0 and len(retained) > 0:
+        if pruned > 0:
             self.circuit.neurons = retained
             self.circuit._neuron_lookup = {n.neuron_id: n for n in retained}
             self.save_circuit()

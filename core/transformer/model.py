@@ -164,6 +164,27 @@ class VeronicaTransformer(Module):
         )
         self.neurogenesis_circuit: Optional[Any] = None
 
+    def load_weights(
+        self,
+        filepath: Union[str, Path],
+        strict: bool = False,
+        custom_mapping: Optional[Dict[str, str]] = None,
+    ) -> Dict[str, Any]:
+        """Carrega tensores de pesos densos (.safetensors, .bin, .pt, .npz) via SafetensorsWeightBridge."""
+        from core.transformer.weight_bridge import SafetensorsWeightBridge
+        bridge = SafetensorsWeightBridge()
+        return bridge.load_into_model(filepath, self, strict=strict, custom_mapping=custom_mapping)
+
+    def save_weights(
+        self,
+        filepath: Union[str, Path],
+        format: str = "safetensors",
+    ) -> str:
+        """Exporta os pesos do modelo usando SafetensorsWeightBridge."""
+        from core.transformer.weight_bridge import SafetensorsWeightBridge
+        bridge = SafetensorsWeightBridge()
+        return bridge.save_weights(filepath, self, format=format)
+
     def attach_neurogenesis_circuit(self, circuit: Any) -> None:
         """Conecta o circuito de neurogênese dinâmica ao modelo autoregressivo."""
         self.neurogenesis_circuit = circuit
@@ -253,9 +274,13 @@ class VeronicaTransformer(Module):
         top_p: float = 0.9,
         stop_checker: Optional[Callable[[List[int]], bool]] = None,
         kv_cache: Optional[Any] = None,
+        connector: Optional[Any] = None,
+        memory_system: Optional[Any] = None,
     ) -> Iterator[int]:
         """
         Gera tokens autoregressivamente em streaming token-a-token com reutilização de PrefixKVCache.
+        Executa inferência neural densa genuína (amostragem probabilística com temperature, top_k, top_p)
+        sem nenhum template estático.
         """
         if kv_cache is None:
             from core.inference.generator import PrefixKVCache

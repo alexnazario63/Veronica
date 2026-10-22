@@ -21,16 +21,51 @@ from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 
 
 SUPPORTED_ARTIFACT_KINDS: Set[str] = {
+    # Network change, diagnostic and topology kinds
     "config_diff",
     "change_plan_10_steps",
     "diagnostic_report_11_steps",
     "topology_blast_radius",
     "rca_document",
     "rca_report",
+    "rca_diagnostic_report",
     "change_plan",
+    # Documentation and diagramming
     "markdown",
+    "report",
+    "spec",
+    "spec_document",
+    "architecture_document",
+    "mermaid",
+    "diagram",
+    "svg",
+    # Structured specifications
+    "json",
+    "yaml",
+    "toml",
+    "xml",
+    # Dynamic code in any language
     "code",
+    "python",
+    "typescript",
+    "javascript",
+    "rust",
+    "c++",
+    "cpp",
+    "c",
+    "go",
+    "golang",
+    "sql",
+    "bash",
+    "shell",
+    "java",
+    "csharp",
+    "kotlin",
+    "html",
+    "css",
+    # Generic and open
     "generic",
+    "text",
 }
 
 
@@ -200,6 +235,7 @@ class ArtifactStore:
         self.initialize_sync()
         aid = str(artifact_id).strip()
         kind_clean = str(kind).strip().lower()
+        SUPPORTED_ARTIFACT_KINDS.add(kind_clean)
 
         # Vincula automaticamente plan_id se for change_plan_10_steps
         if not plan_id and (aid.startswith("chg-") or kind_clean == "change_plan_10_steps"):

@@ -10,7 +10,8 @@ import {
   Minimize2,
   X,
   AlertTriangle,
-  FileCheck
+  FileCheck,
+  Code
 } from 'lucide-react';
 import type { Artifact, StoredArtifact } from '../types/veronica';
 import { DiffEditor } from './DiffEditor';
@@ -66,12 +67,12 @@ export const NetCanvas: React.FC<NetCanvasProps> = ({
 
   return (
     <aside className={`netcanvas-panel ${isExpanded ? 'netcanvas-expanded' : ''} animate__animated animate__fadeInRight`}>
-      {/* NetCanvas Header */}
+      {/* Workspace Header */}
       <div className="netcanvas-header">
         <div className="netcanvas-header-left">
-          <span className="netcanvas-eyebrow">NETCANVAS · WORKUI</span>
+          <span className="netcanvas-eyebrow">POLYGLOT WORKSPACE · WORKUI</span>
           <div className="netcanvas-title-row">
-            <h2 className="netcanvas-title">{artifact.type}</h2>
+            <h2 className="netcanvas-title">{artifact.filename || artifact.type}</h2>
             <span className="netcanvas-version-pill">v{artifact.version}</span>
             <span className="netcanvas-id-pill" title={artifact.id}>
               {artifact.id}
@@ -84,7 +85,7 @@ export const NetCanvas: React.FC<NetCanvasProps> = ({
             type="button"
             className="netcanvas-btn-icon"
             onClick={() => setIsExpanded(!isExpanded)}
-            title={isExpanded ? 'Restaurar split-screen' : 'Expandir NetCanvas'}
+            title={isExpanded ? 'Restaurar split-screen' : 'Expandir Workspace'}
           >
             {isExpanded ? <Minimize2 size={15} /> : <Maximize2 size={15} />}
           </button>
@@ -92,7 +93,7 @@ export const NetCanvas: React.FC<NetCanvasProps> = ({
             type="button"
             className="netcanvas-btn-icon close-btn"
             onClick={onClose}
-            title="Fechar WorkUI NetCanvas"
+            title="Fechar Workspace"
           >
             <X size={17} />
           </button>
@@ -106,7 +107,7 @@ export const NetCanvas: React.FC<NetCanvasProps> = ({
           className={`netcanvas-tab ${activeTab === 'diff' ? 'active' : ''}`}
           onClick={() => setActiveTab('diff')}
         >
-          <GitCompare size={13} /> Editor Diff &amp; Proposta
+          <Code size={13} /> Editor Poliglota &amp; Diff
         </button>
 
         <button
@@ -143,6 +144,7 @@ export const NetCanvas: React.FC<NetCanvasProps> = ({
             onSelectVersion={onSelectVersion}
             onSaveProposed={handleSaveProposed}
             onAskAdjustment={onAskAdjustment}
+            api={api}
           />
         )}
 
@@ -165,7 +167,7 @@ export const NetCanvas: React.FC<NetCanvasProps> = ({
               <FileCheck size={17} />
               <div>
                 <b>Relatório de Diagnóstico e Causa Raiz (RCA)</b>
-                <small>Investigação determinística guiada por telemetria e catálogo de 12 metadados</small>
+                <small>Investigação determinística guiada por telemetria e catálogo de metadados</small>
               </div>
             </div>
 

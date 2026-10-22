@@ -16,6 +16,10 @@ from core.transformer.model import (
     TransformerBlock,
     VeronicaTransformer,
 )
+from core.transformer.weight_bridge import (
+    SafetensorsWeightBridge,
+    NeuralInferenceConnector,
+)
 
 __all__ = [
     "VeronicaConfig",
@@ -28,4 +32,6 @@ __all__ = [
     "FeedForwardNetwork",
     "TransformerBlock",
     "VeronicaTransformer",
+    "SafetensorsWeightBridge",
+    "NeuralInferenceConnector",
 ]

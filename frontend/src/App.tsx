@@ -26,7 +26,9 @@ import {
   Wrench,
   Sparkles,
   Building2,
-  Maximize2
+  Maximize2,
+  Code,
+  Zap
 } from 'lucide-react';
 import { create } from 'zustand';
 import type {
@@ -397,10 +399,10 @@ export default function VeronicaApp() {
       const attachmentsText = chips
         .map(
           (c) =>
-            `\n\n--- [ANEXO COMPACTO: ${c.title} (${c.lineCount} linhas)] ---\n\`\`\`${c.type === 'log' ? 'log' : 'config'}\n${c.content}\n\`\`\`\n`
+            `\n\n--- [ARQUIVO ANEXADO: ${c.title} (${c.language || c.type}, ${c.lineCount} linhas)] ---\n\`\`\`${c.language || c.type}\n${c.content}\n\`\`\`\n`
         )
         .join('\n');
-      finalPrompt = `${content || 'Analise a configuração anexada:'}${attachmentsText}`;
+      finalPrompt = `${content || 'Analise o arquivo anexado:'}${attachmentsText}`;
     }
 
     const title = conversationTitle(content || (chips[0] ? chips[0].title : 'Conversa'));
@@ -640,7 +642,7 @@ export default function VeronicaApp() {
           </div>
           <div>
             <b>VERONICA</b>
-            <small>NET NEURAL AI</small>
+            <small>GENERAL INTELLIGENCE &amp; CODEX</small>
           </div>
         </div>
 
@@ -653,7 +655,7 @@ export default function VeronicaApp() {
           className={`side-link ${view === 'work' ? 'selected' : ''}`}
           onClick={() => setView('work')}
         >
-          <Network size={16} /> Chat &amp; NetCanvas
+          <Code size={16} /> Chat &amp; Workspace Poliglota
         </button>
         <button
           className={`side-link ${view === 'observatory' ? 'selected' : ''}`}
@@ -729,7 +731,7 @@ export default function VeronicaApp() {
         </div>
 
         {/* Stored Artifacts */}
-        <div className="side-label">Artefatos (NetCanvas)</div>
+        <div className="side-label">Artefatos &amp; Código</div>
         <div className="device-list">
           {workspaceArtifacts.map(({ artifact: item }) => (
             <button
@@ -782,8 +784,8 @@ export default function VeronicaApp() {
                 >
                   <Menu size={17} />
                 </button>
-                <span className="status-dot" /> Veronica Transformer{' '}
-                <span className="version">LOCAL · {mode === 'agent' ? 'AGENT' : 'CHAT'}</span>
+                <span className="status-dot" /> Veronica Intelligence Core{' '}
+                <span className="version">UNIVERSAL · {mode === 'agent' ? 'AGENT' : 'CHAT'}</span>
               </div>
 
               <div className="top-actions">
@@ -859,25 +861,25 @@ export default function VeronicaApp() {
                   <div className="welcome-icon">
                     <BrainCircuit size={32} />
                   </div>
-                  <p className="eyebrow">CHAT · AGENT · NETCANVAS</p>
-                  <h1>Como posso ajudar na sua rede?</h1>
+                  <p className="eyebrow">UNIVERSAL INTELLIGENCE · POLYGLOT CODEX · WORKSPACE</p>
+                  <h1>Como posso ajudar você hoje?</h1>
                   <p>
-                    Investigue incidentes, consulte documentação com 12 metadados ou prepare mudanças seguras
-                    com o NetCanvas e o Deterministic Change Controller.
+                    Especialista em programação poliglota (Python, TypeScript, Rust, C++, Go, SQL), matemática,
+                    ciências, análise de dados e engenharia determinística com execução em sandbox.
                   </p>
 
                   <div className="suggestions">
-                    <button onClick={() => setDraft('/diagnostico Investigue instabilidade de BGP no Core 01')}>
-                      <Activity size={17} /> Diagnosticar incidente
+                    <button onClick={() => setDraft('/codigo Implemente um servidor HTTP assíncrono em Rust com Axum e SQLite')}>
+                      <Code size={17} /> Programação &amp; Codex
+                      <small>/codigo</small>
+                    </button>
+                    <button onClick={() => setDraft('/run Execute uma análise estatística e cálculo matricial em Python com NumPy')}>
+                      <Zap size={17} /> Sandbox Python &amp; Dados
+                      <small>/run</small>
+                    </button>
+                    <button onClick={() => setDraft('/diagnostico Analise os logs do cluster e verifique estabilidade de enlaces')}>
+                      <Activity size={17} /> Engenharia de Sistemas &amp; Redes
                       <small>/diagnostico</small>
-                    </button>
-                    <button onClick={() => setDraft('/simular-falha Simule queda do enlace 10.0.0.1 - 10.0.0.2')}>
-                      <GitBranch size={17} /> Simular falha &amp; Blast Radius
-                      <small>/simular-falha</small>
-                    </button>
-                    <button onClick={() => setDraft('/mudanca Planeje ajuste de BGP timer no cisco-iosxr-01')}>
-                      <ClipboardList size={17} /> Planejar mudança de configuração
-                      <small>/mudanca</small>
                     </button>
                   </div>
                 </div>
@@ -941,7 +943,7 @@ export default function VeronicaApp() {
                             {m.content ||
                               (busy && isLastAssistant ? (
                                 <span className="typing">
-                                  Analisando telemetria e validando hipóteses…
+                                  Pensando, executando código e validando hipóteses…
                                 </span>
                               ) : (
                                 ''

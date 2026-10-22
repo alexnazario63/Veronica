@@ -36,6 +36,13 @@ class DevelopmentalStage:
     SPECIALIZATION = "Fase 4: Especialização Técnica (Raciocínio Causal e Correlações)"
     MASTERY = "Fase 5: Maestria e Sabedoria Operacional Autônoma"
 
+    # Aliases de compatibilidade para estágios ontogenéticos
+    INFANT = INFANCY
+    CHILD = EARLY_LEARNING
+    ADOLESCENT = SYNAPTIC_EXPANSION
+    SPECIALIST = SPECIALIZATION
+    EXPERT = MASTERY
+
 
 @dataclass
 class DevelopmentalMilestone:
@@ -379,6 +386,41 @@ class DevelopmentEngine:
             "total_texts_read": self.total_texts_read,
             "milestones": [asdict(m) for m in self.milestones],
             "introspective_narrative": text,
+        }
+
+    def enrich_inference_context(
+        self,
+        query: str,
+        top_k_concepts: int = 5,
+        top_k_episodes: int = 3,
+    ) -> Dict[str, Any]:
+        """
+        Enriquece dinamicamente o contexto de inferência com memórias episódicas
+        e conceitos aprendidos em tempo de execução via lookup ultrarrápido KNN (< 2.0 ms).
+        """
+        concepts = self.memory.query_concepts(query, limit=top_k_concepts)
+        recent_episodes = sorted(
+            self.memory.episodic_memories.values(),
+            key=lambda x: x.timestamp,
+            reverse=True,
+        )[:top_k_episodes]
+
+        concept_summaries = [f"{c.label}: {c.description}" for c in concepts]
+        episode_summaries = [f"[{e.modality}] {e.experience_summary}" for e in recent_episodes]
+
+        context_lines: List[str] = []
+        if concept_summaries:
+            context_lines.append("Conceitos Relevantes: " + " | ".join(concept_summaries))
+        if episode_summaries:
+            context_lines.append("Memórias Episódicas Recentes: " + " | ".join(episode_summaries))
+
+        enriched_context = "\n".join(context_lines)
+        return {
+            "enriched_context": enriched_context,
+            "concepts": concepts,
+            "episodes": recent_episodes,
+            "developmental_stage": self.current_stage,
+            "active_neurons_count": len(self.neurogenesis.circuit.neurons),
         }
 
     def get_full_development_status(self) -> Dict[str, Any]:

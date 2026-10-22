@@ -122,6 +122,32 @@ class HybridRAGEngine:
             self.doc_embeddings.pop(doc.doc_id, None)
         if recompute_stats:
             self._recompute_index_stats()
+            self.rebuild_bm25s_index()
+
+    def rebuild_bm25s_index(self) -> None:
+        """Reconstrói ou atualiza o índice esparso BM25S em tempo real."""
+        try:
+            import bm25s
+            self._bm25s_ids = [
+                doc_id for doc_id, doc in self.documents.items()
+                if not doc.security_quarantined
+            ]
+            if self._bm25s_ids:
+                corpus = [" ".join(self.doc_tokens.get(doc_id, ())) for doc_id in self._bm25s_ids]
+                retriever = bm25s.BM25()
+                retriever.index(bm25s.tokenize(corpus))
+                self._bm25s_index = retriever
+        except Exception:
+            self._bm25s_index = None
+
+    def index_document_in_realtime(
+        self,
+        doc: KnowledgeDocument,
+        compute_embedding: bool = True,
+    ) -> None:
+        """Indexa dinamicamente um novo documento no BM25S e no índice vetorial em tempo real."""
+        self.add_document(doc, recompute_stats=True, compute_embedding=compute_embedding)
+        self.rebuild_bm25s_index()
 
     def _index_embedding(self, doc_id: str, embedding: np.ndarray) -> None:
         try:

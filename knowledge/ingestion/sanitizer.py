@@ -3,7 +3,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 import re
-from typing import Iterable, List, Tuple
+from typing import Iterable, Tuple
 
 from knowledge.ingestion.ingestor import detect_prompt_injection, scrub_secrets
 

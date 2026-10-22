@@ -9,46 +9,11 @@ import time
 from typing import Any, Dict, Mapping, Optional, Union
 
 from core.contracts import ToolSafetyTier
+from core.agent.tools.base import AgentTool
 
 
-class PythonSandboxTool:
+class PythonSandboxTool(AgentTool):
     """Executa código Python dinâmico em subprocesso isolado com timeout e captura completa."""
-
-    name: str = "python_sandbox"
-    description: str = (
-        "Executes dynamic Python code in an isolated subprocess with timeout (10s), "
-        "capturing stdout, stderr, exception trace, and return values. "
-        "Used for mathematical calculations, algorithms, hypothesis validation, simulations, and unit tests."
-    )
-    tier: ToolSafetyTier = ToolSafetyTier.TIER_0_READ_ONLY
-    is_safe_read_only: bool = True
-    input_schema: Dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "code": {
-                "type": "string",
-                "description": "Python source code or script to execute in sandbox",
-            },
-            "timeout": {
-                "type": "number",
-                "description": "Execution timeout in seconds (default 10.0s)",
-            },
-        },
-        "required": ["code"],
-    }
-    output_schema: Dict[str, Any] = {
-        "type": "object",
-        "properties": {
-            "status": {"type": "string", "enum": ["success", "error", "timeout"]},
-            "stdout": {"type": "string"},
-            "stderr": {"type": "string"},
-            "returncode": {"type": "integer"},
-            "output": {"type": "string"},
-            "result": {"type": "any"},
-            "execution_time_ms": {"type": "number"},
-            "error": {"type": "string"},
-        },
-    }
 
     def __init__(
         self,
@@ -58,19 +23,47 @@ class PythonSandboxTool:
         description: Optional[str] = None,
         **kwargs: Any,
     ) -> None:
-        self.name = name
-        if isinstance(tier, ToolSafetyTier):
-            self.tier = tier
-        elif isinstance(tier, str) and hasattr(ToolSafetyTier, tier):
-            self.tier = getattr(ToolSafetyTier, tier)
-        else:
-            self.tier = ToolSafetyTier.TIER_0_READ_ONLY
-
-        if description:
-            self.description = description
+        desc = description or (
+            "Executes dynamic Python code in an isolated subprocess with timeout (10s), "
+            "capturing stdout, stderr, exception trace, and return values. "
+            "Used for mathematical calculations, algorithms, hypothesis validation, simulations, and unit tests."
+        )
+        super().__init__(
+            name=name,
+            tier=tier,
+            description=desc,
+            input_schema={
+                "type": "object",
+                "properties": {
+                    "code": {
+                        "type": "string",
+                        "description": "Python source code or script to execute in sandbox",
+                    },
+                    "timeout": {
+                        "type": "number",
+                        "description": "Execution timeout in seconds (default 10.0s)",
+                    },
+                },
+                "required": ["code"],
+            },
+            output_schema={
+                "type": "object",
+                "properties": {
+                    "status": {"type": "string", "enum": ["success", "error", "timeout"]},
+                    "stdout": {"type": "string"},
+                    "stderr": {"type": "string"},
+                    "returncode": {"type": "integer"},
+                    "output": {"type": "string"},
+                    "result": {"type": "any"},
+                    "execution_time_ms": {"type": "number"},
+                    "error": {"type": "string"},
+                },
+            },
+            is_safe_read_only=True,
+            **kwargs,
+        )
         self.default_timeout = max(1.0, float(timeout_seconds))
         self.handler = self.execute
-        self.is_safe_read_only = True
 
     def execute(
         self,

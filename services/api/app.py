@@ -490,6 +490,117 @@ def create_app(data_dir: Optional[Path] = None) -> FastAPI:
 
         return StreamingResponse(_token_stream(), media_type="text/event-stream")
 
+    @app.post("/api/chat/stream")
+    @app.get("/api/chat/stream")
+    async def stream_chat_direct(
+        request: Request,
+        req: Optional[SendMessageRequest] = None,
+        conversation_id: Optional[str] = None,
+        query: Optional[str] = None,
+        content: Optional[str] = None,
+        mode: str = "chat",
+        x_user_id: str = Header(default="usr-eng-01"),
+        x_tenant_id: str = Header(default="default"),
+        authorization: Optional[str] = Header(default=None),
+    ) -> StreamingResponse:
+        """Endpoint SSE em tempo real para streaming de tokens e eventos de ferramentas de chat."""
+        caller = _resolve_caller(authorization, x_user_id, x_tenant_id)
+        msg_text = ""
+        target_conv_id = conversation_id
+        eff_tenant = caller.tenant_id
+        eff_mode = mode
+        model_profile = "vrn-pro"
+        response_style = "technical"
+        mentions = None
+        selected_lines_range = None
+        selected_artifact_id = None
+        selected_artifact_version = None
+        patch_diff = None
+        target_devices = None
+        modality = "TEXT"
+
+        if req is not None:
+            msg_text = req.content
+            eff_tenant = req.tenant_id or caller.tenant_id
+            eff_mode = req.mode or mode
+            model_profile = req.model_profile
+            response_style = req.response_style
+            mentions = req.mentions
+            selected_lines_range = req.selected_lines_range
+            selected_artifact_id = req.selected_artifact_id
+            selected_artifact_version = req.selected_artifact_version
+            patch_diff = req.patch_diff
+            target_devices = req.target_devices
+            modality = req.modality
+        elif request.method == "POST":
+            try:
+                body = await request.json()
+                if isinstance(body, dict):
+                    msg_text = body.get("content") or body.get("query") or ""
+                    target_conv_id = body.get("conversation_id") or target_conv_id
+                    eff_mode = body.get("mode") or eff_mode
+                    model_profile = body.get("model_profile", model_profile)
+                    response_style = body.get("response_style", response_style)
+                    mentions = body.get("mentions")
+                    selected_lines_range = body.get("selected_lines_range")
+                    selected_artifact_id = body.get("selected_artifact_id")
+                    selected_artifact_version = body.get("selected_artifact_version")
+                    patch_diff = body.get("patch_diff")
+                    target_devices = body.get("target_devices")
+                    modality = body.get("modality", "TEXT")
+            except Exception:
+                pass
+
+        if not msg_text:
+            msg_text = content or query or ""
+
+        if not target_conv_id:
+            new_conv = hub.conversation_service.create_conversation(
+                user_id=caller.user_id,
+                title=(msg_text[:40] or "Chat Stream").strip(),
+                model_version=hub.trainer.model_version,
+                tenant_id=eff_tenant,
+            )
+            target_conv_id = new_conv["conversation_id"]
+
+        active_cid = target_conv_id
+
+        async def _direct_stream():
+            try:
+                for event in hub.chat_service.stream_message(
+                    conversation_id=active_cid,
+                    user_id=caller.user_id,
+                    message_text=msg_text,
+                    modality=modality,
+                    target_devices=target_devices,
+                    mode=eff_mode,
+                    model_profile=model_profile,
+                    response_style=response_style,
+                    mentions=mentions,
+                    selected_lines_range=selected_lines_range,
+                    selected_artifact_id=selected_artifact_id,
+                    selected_artifact_version=selected_artifact_version,
+                    patch_diff=patch_diff,
+                    tenant_id=eff_tenant,
+                ):
+                    if await request.is_disconnected():
+                        hub.chat_service.cancel_generation(active_cid)
+                        break
+                    yield sse_frame(event, event.get("type"))
+                    await asyncio.sleep(0.005)
+            except Exception:
+                logging.getLogger(__name__).exception("Direct chat stream failed for conversation %s", active_cid)
+                if not await request.is_disconnected():
+                    yield sse_frame(
+                        {"type": "error", "message": "A Veronica encontrou um erro no streaming. Tente novamente."},
+                        "error",
+                    )
+            finally:
+                if await request.is_disconnected():
+                    hub.chat_service.cancel_generation(active_cid)
+
+        return StreamingResponse(_direct_stream(), media_type="text/event-stream")
+
     @app.post("/api/conversations/{conversation_id}/agent-stream")
     async def stream_agent_events(
         conversation_id: str,
